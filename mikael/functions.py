@@ -10,8 +10,8 @@ def get_days_sinse_beginning_of_year(datetime64_string: str):
     return days_gone_by
 
 
-def get_seconds_of_day(datetime64_string: str):
+def get_hours_of_day(datetime64_string: str):
     datetime_obj = np.datetime64(datetime64_string).astype(pd.Timestamp)
     time_difference = datetime_obj - datetime_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-    time_passed_seconds = time_difference.total_seconds()
-    return time_passed_seconds
+    time_passed_hours = time_difference.total_seconds() / (60**2)
+    return time_passed_hours

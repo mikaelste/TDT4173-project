@@ -4,7 +4,7 @@ import json
 import pandas as pd
 
 # Helper functions
-from functions import get_days_sinse_beginning_of_year, get_seconds_of_day
+from functions import get_days_sinse_beginning_of_year, get_hours_of_day
 
 # Types handling
 from typing import Optional
@@ -12,12 +12,14 @@ import numpy as np
 
 # Data science
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
-from sklearn.feature_selection import SelectFromModel
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.model_selection import KFold, train_test_split
+from sklearn.feature_selection import RFECV, SelectFromModel
+from sklearn.metrics import make_scorer, mean_squared_error, r2_score, mean_absolute_error
 
 # Feature engineering
+from feature_engine.selection import DropCorrelatedFeatures, DropConstantFeatures
 from feature_engine.timeseries.forecasting import LagFeatures
+
 
 # Machine learning tool
 import xgboost as xgb
@@ -42,19 +44,25 @@ class MasterDataframes:
     #     self.df_b = self.prep_dataset_x(X_train_observed_b, Y_train_observed_b)
     #     self.df_c = self.prep_dataset_x(X_train_observed_c, Y_train_observed_c)
 
-    def prep_dataset_x_y(self, location: str) -> pd.DataFrame:
+    def prep_dataset_x_y(self, location: str, drop_features=True) -> pd.DataFrame:
         if location == "A":
-            X_train_x = X_train_observed_a
             Y_train_x = Y_train_observed_a
+            X_train_observed_x = X_train_observed_a
+            X_train_estimated_x = X_train_estimated_a
         if location == "B":
-            X_train_x = X_train_observed_b
+            X_train_observed_x = X_train_observed_b
             Y_train_x = Y_train_observed_b
+            X_train_estimated_x = X_train_estimated_b
         if location == "C":
-            X_train_x = X_train_observed_c
+            X_train_observed_x = X_train_observed_c
             Y_train_x = Y_train_observed_c
+            X_train_estimated_x = X_train_estimated_c
 
-        X_train_group = X_train_x.groupby(pd.Grouper(key="date_forecast", freq="1H")).mean().reset_index()
+        X_train_total = pd.concat([X_train_observed_x, X_train_estimated_x]).reset_index()
+
+        X_train_group = X_train_total.groupby(pd.Grouper(key="date_forecast", freq="1H")).mean().reset_index()
         X_train_group.rename(columns={"date_forecast": "time"}, inplace=True)
+        X_train_group.drop(columns=["date_calc"], inplace=True)
 
         inner_merge = pd.merge(X_train_group, Y_train_x, on="time", how="inner")
         id_columns = [c for c in inner_merge.columns if ":idx" in c]
@@ -64,7 +72,7 @@ class MasterDataframes:
         cleaned_df = self._clean_df(df_new_features)
 
         X = cleaned_df[[c for c in cleaned_df.columns if "pv_measure" not in c]].astype("float")
-        X = self._add_lag_features(X)
+        # X = self._add_lag_features(X, drop_features=drop_features)
 
         Y = cleaned_df["pv_measurement"].fillna(0).astype("float")
 
@@ -87,14 +95,14 @@ class MasterDataframes:
     def _add_features_full_df(self, df: pd.DataFrame) -> pd.DataFrame:
         df["year"] = df["time"].apply(lambda datestring: np.datetime64(datestring).astype(pd.Timestamp).year)
         df["month"] = df["time"].apply(lambda datestring: np.datetime64(datestring).astype(pd.Timestamp).month)
-        df["seconds_in_day"] = df["time"].apply(lambda datestring: get_seconds_of_day(datestring))
+        df["hours"] = df["time"].apply(lambda datestring: get_hours_of_day(datestring))
         df["since_jan_1"] = df["time"].apply(lambda datestring: get_days_sinse_beginning_of_year(datestring))
 
         df["effective_energy"] = df["clear_sky_rad:W"] * (df["total_cloud_cover:p"] / 100)
 
         return df
 
-    def _add_lag_features(self, X: pd.DataFrame) -> pd.DataFrame:
+    def _add_lag_features(self, X: pd.DataFrame, drop_features: bool = True) -> pd.DataFrame:
         no_nan_columns_df = X[[c for c in X.columns if len(X[X[c].isna()].index) == 0]]
         no_nan_columns_df = no_nan_columns_df.select_dtypes(include=["number", "float", "int"])
         no_nan_columns = no_nan_columns_df[~no_nan_columns_df.isna()].columns.to_list()
@@ -103,6 +111,13 @@ class MasterDataframes:
 
         X_tr = lag_f.fit_transform(no_nan_columns_df)
         X[X_tr.columns] = X_tr
+
+        if drop_features:
+            tr = DropCorrelatedFeatures(variables=None, method="pearson", threshold=0.8)
+            Xdc = tr.fit_transform(X)
+
+            transformer = DropConstantFeatures(tol=0.7, missing_values="ignore")
+            X = transformer.fit_transform(Xdc)
 
         return X
 
@@ -135,7 +150,7 @@ class MasterDataframes:
 
         train_mapped = df.merge(
             test_mapped[["time", "time_merge"]], how="left", on="time_merge", suffixes=("_train", "_test")
-        )
+        ).reset_index()
 
         df_c = train_mapped[train_mapped["time_test"].notna()]
 
@@ -158,10 +173,10 @@ class MasterDataframes:
         filled = self._fill_df(df, categorical)
 
         df_new_features = self._add_features_full_df(filled)
-        df_with_lag = self._add_lag_features(df_new_features)
-        df_shortened = self._shorten_dataset_to_prediction_scale(df_with_lag, location)
+        # df_with_lag = self._add_lag_features(df_new_features)
+        df_shortened = self._shorten_dataset_to_prediction_scale(df_new_features, location)
 
-        print(f"Location {location}. length: {str(len(df_with_lag))}")
+        print(f"Location {location}. length: {str(len(df_new_features))}")
 
         return df_shortened
 
@@ -256,14 +271,15 @@ class MLModel:
         # print("Shape of y_pred before inverse transform:", y_pred.shape)
         # print("Sample of y_pred before inverse transform:", y_pred[:5])
 
-        # reverted_y_pred = self.M_df.Y_scaler.inverse_transform(y_pred[:, 1].reshape(-1, 1))
+        # y_pred_s = pd.Series(y_pred["1"])
+        # reverted_y_pred = self.M_df.Y_scaler.inverse_transform(y_pred_s.ravel())
 
         # # Debugging statements
         # print("Shape of reverted_y_pred:", reverted_y_pred.shape)
         # print("Sample of reverted_y_pred:", reverted_y_pred[:5])
 
-        # return reverted_y_pred
         return y_pred
+        # return reverted_y_pred
 
     def _get_missing_indexes(self, df: pd.DataFrame, location: str) -> pd.DataFrame:
         df_c = df.copy()
@@ -283,7 +299,7 @@ class ModelTrainer:
     M_df = MasterDataframes()
 
     def train_model(self, location: str, trials: int):
-        X, Y = self.M_df.prep_dataset_x_y("C")
+        X, Y = self.M_df.prep_dataset_x_y(location)
 
         X_train, X_test, y_train, y_test = train_test_split(X, Y, random_state=10, test_size=0.20)
 
@@ -325,8 +341,17 @@ class ModelTrainer:
 
         selection_model = xgb.XGBRegressor(**study.best_params)
         selection_model.fit(select_X_train, y_train)
-
         select_X_test = selection.transform(X_test)
+
+        # rfecv = RFECV(estimator=model, verbose=1, step=1, cv=KFold(5), scoring=make_scorer(mean_absolute_error))
+        # rfecv.fit(X_train, y_train)
+
+        # select_X_train = rfecv.transform(X_train)
+        # select_X_test = rfecv.transform(X_test)
+
+        # selection_model = xgb.XGBRegressor(**study.best_params)
+        # selection_model.fit(select_X_train, y_train)
+
         y_pred = selection_model.predict(select_X_test)
 
         M_df_c = self.M_df
