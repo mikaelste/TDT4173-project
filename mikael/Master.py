@@ -30,7 +30,6 @@ import optuna
 # plotting
 import matplotlib.pyplot as plt
 
-
 class MasterDataframes:
     df_a: pd.DataFrame = None
     df_b: pd.DataFrame = None
@@ -62,7 +61,7 @@ class MasterDataframes:
 
         X_train_group = X_train_total.groupby(pd.Grouper(key="date_forecast", freq="1H")).mean().reset_index()
         X_train_group.rename(columns={"date_forecast": "time"}, inplace=True)
-        X_train_group.drop(columns=["date_calc"], inplace=True)
+        # X_train_group.drop(columns=["date_calc"], inplace=True)
 
         inner_merge = pd.merge(X_train_group, Y_train_x, on="time", how="inner")
         id_columns = [c for c in inner_merge.columns if ":idx" in c]
@@ -72,6 +71,10 @@ class MasterDataframes:
         cleaned_df = self._clean_df(df_new_features)
 
         X = cleaned_df[[c for c in cleaned_df.columns if "pv_measure" not in c]].astype("float")
+        
+        features_not_index = [ col for col in X.columns if col != 'index']
+        X = X[features_not_index]
+        # X.drop(columns=["index"], inplace=True)
         # X = self._add_lag_features(X, drop_features=drop_features)
 
         Y = cleaned_df["pv_measurement"].fillna(0).astype("float")
@@ -176,15 +179,10 @@ class MasterDataframes:
         # df_with_lag = self._add_lag_features(df_new_features)
         df_shortened = self._shorten_dataset_to_prediction_scale(df_new_features, location)
 
-        print(f"Location {location}. length: {str(len(df_new_features))}")
+        # print(f"Location {location}. length: {str(len(df_new_features))}")
 
         return df_shortened
 
-
-# Estimate
-X_train_estimated_a = pd.read_parquet("../A/X_train_estimated.parquet")
-X_train_estimated_b = pd.read_parquet("../B/X_train_estimated.parquet")
-X_train_estimated_c = pd.read_parquet("../C/X_train_estimated.parquet")
 
 # Test estimates
 X_test_estimated_a = pd.read_parquet("../A/X_test_estimated.parquet")
@@ -198,6 +196,11 @@ X_test_C = pd.read_parquet("../C/X_test_C.parquet")
 
 test_df = pd.read_csv("../test.csv")
 
+
+#Training Estimate
+X_train_estimated_a = pd.read_parquet("../A/X_train_estimated.parquet")
+X_train_estimated_b = pd.read_parquet("../B/X_train_estimated.parquet")
+X_train_estimated_c = pd.read_parquet("../C/X_train_estimated.parquet")
 # Observations
 X_train_observed_a = pd.read_parquet("../A/X_train_observed.parquet")
 X_train_observed_b = pd.read_parquet("../B/X_train_observed.parquet")
