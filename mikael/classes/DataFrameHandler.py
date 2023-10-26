@@ -2,7 +2,7 @@
 import pandas as pd
 
 # Helper functions
-from functions import get_days_sinse_beginning_of_year, get_hours_of_day
+from functions import get_days_sinse_beginning_of_year, get_hours_of_day, remove_consecutive_measurments
 
 # Types handling
 import numpy as np
@@ -66,13 +66,6 @@ class MasterDataframes:
             X_train_total_b = pd.concat([X_train_observed_b, X_train_estimated_b]).reset_index()
             X_train_total_c = pd.concat([X_train_observed_c, X_train_estimated_c]).reset_index()
 
-            # Y_train_total = pd.merge(
-            #     pd.merge(Y_train_observed_a, Y_train_observed_b, on="time", how="inner", suffixes=("_a", "_b")),
-            #     Y_train_observed_c,
-            #     on="time",
-            #     how="inner",
-            #     suffixes=("", "_c"),
-            # )
             if location != "A":
                 X_train_total_a = X_train_total_a.drop(columns=non_equal_value_columns)
             if location != "B":
@@ -99,7 +92,8 @@ class MasterDataframes:
     def prep_dataset_x_y(self, location: str, drop_features=False, merge_dfs=False) -> pd.DataFrame:
         X_train_total, Y_train_total = self.prep_dataset(location, merge_dfs)
 
-        X_train_group = X_train_total.groupby(pd.Grouper(key="date_forecast", freq="1H")).mean().reset_index()
+        # X_train_group = X_train_total.groupby(pd.Grouper(key="date_forecast", freq="1H")).mean().reset_index()
+        X_train_group = X_train_total.groupby(pd.Grouper(key="date_forecast", freq="1H")).first().reset_index()
         X_train_group.rename(columns={"date_forecast": "time"}, inplace=True)
         X_train_group.drop(columns=["date_calc"], inplace=True)
         X_train_group.drop(columns=[c for c in X_train_group.columns if "index" in c], inplace=True)
@@ -110,11 +104,12 @@ class MasterDataframes:
         filled = self._fill_df(inner_merge, id_columns)
         df_new_features = self._add_features_full_df(filled)
         cleaned_df = self._clean_df(df_new_features)
+        drop_consecutive_pv_zeros = remove_consecutive_measurments(cleaned_df)
 
-        X = cleaned_df.drop(columns=["pv_measurement"]).astype("float")
+        X = drop_consecutive_pv_zeros.drop(columns=["pv_measurement"]).astype("float")
         # X = self._add_lag_features(X, drop_features=drop_features)
 
-        Y = cleaned_df["pv_measurement"].fillna(0).reset_index(drop=True)
+        Y = drop_consecutive_pv_zeros["pv_measurement"].fillna(0).reset_index(drop=True)
 
         # X_scaled, Y_scaled = self._scale_and_create_scaler(X, Y)
         # return X_scaled, Y_scaled
@@ -163,10 +158,10 @@ class MasterDataframes:
 
     def _fill_df(self, df: pd.DataFrame, categorical_columns: list) -> pd.DataFrame:
         inner_to_split = df.copy()
-        non_id_columns = [c for c in inner_to_split.columns if ":idx" not in c]
+        # non_id_columns = [c for c in inner_to_split.columns if ":idx" not in c]
 
         inner_to_split[categorical_columns].fillna(0, inplace=True)
-        inner_to_split[non_id_columns].fillna(method="bfill", inplace=True)
+        # inner_to_split[non_id_columns].fillna(method="bfill", inplace=True)
 
         return inner_to_split
 
