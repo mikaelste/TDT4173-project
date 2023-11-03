@@ -1,4 +1,5 @@
 mats/mlruns
+mats/models
 mats/__pycache__
 *.log
 *.pyc
