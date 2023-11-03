@@ -5,49 +5,43 @@ import sys
 
 from sklearn.metrics import mean_absolute_error
 
-import os
-
-current_dir = os.getcwd()
-print("Current working directory:", current_dir)
-
-
-PATH = "/Users/matsalexander/Desktop/Forest Gump/"
+PATH = "Forest gump"
 # Estimate
 X_train_estimated_a: pd.DataFrame = pd.read_parquet(
-    PATH + 'A/X_train_estimated.parquet')
+    PATH+'/A/X_train_estimated.parquet')
 X_train_estimated_b: pd.DataFrame = pd.read_parquet(
-    PATH + "B/X_train_estimated.parquet")
+    PATH+"/B/X_train_estimated.parquet")
 X_train_estimated_c: pd.DataFrame = pd.read_parquet(
-    PATH + "C/X_train_estimated.parquet")
+    PATH+"/C/X_train_estimated.parquet")
 
 # Test estimates
 X_test_estimated_a: pd.DataFrame = pd.read_parquet(
-    PATH + "A/X_test_estimated.parquet")
+    PATH+"/A/X_test_estimated.parquet")
 X_test_estimated_b: pd.DataFrame = pd.read_parquet(
-    PATH + "B/X_test_estimated.parquet")
+    PATH+"/B/X_test_estimated.parquet")
 X_test_estimated_c: pd.DataFrame = pd.read_parquet(
-    PATH + "C/X_test_estimated.parquet")
+    PATH+"/C/X_test_estimated.parquet")
 
 # Observations
 X_train_observed_a: pd.DataFrame = pd.read_parquet(
-    PATH + "A/X_train_observed.parquet")
+    PATH+"/A/X_train_observed.parquet")
 X_train_observed_b: pd.DataFrame = pd.read_parquet(
-    PATH + "B/X_train_observed.parquet")
+    PATH+"/B/X_train_observed.parquet")
 X_train_observed_c: pd.DataFrame = pd.read_parquet(
-    PATH + "C/X_train_observed.parquet")
+    PATH+"/C/X_train_observed.parquet")
 
 # Targets
 Y_train_observed_a: pd.DataFrame = pd.read_parquet(
-    PATH + "A/train_targets.parquet")
+    PATH+"/A/train_targets.parquet")
 Y_train_observed_b: pd.DataFrame = pd.read_parquet(
-    PATH + "B/train_targets.parquet")
+    PATH+"/B/train_targets.parquet")
 Y_train_observed_c: pd.DataFrame = pd.read_parquet(
-    PATH + "C/train_targets.parquet")
+    PATH+"/C/train_targets.parquet")
 
-test_df_example = pd.read_csv(PATH + "test.csv")
+test_df_example = pd.read_csv(PATH+"/test.csv")
 
 best_submission: pd.DataFrame = pd.read_csv(
-    PATH + "mikael/submissions/fourth_submission.csv")
+    PATH+"/mikael/submissions/fourth_submission.csv")
 
 
 class Pipin:
@@ -307,7 +301,7 @@ class Pipin:
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mats/submissions/lightgbm.csv")
+            PATH+"/mats/submissions/lightgbm.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:
@@ -318,9 +312,9 @@ class Pipin:
         return mean_absolute_error(
             best_submission["prediction"], df["prediction"])
 
-    def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
-        df = df[[prediction_column]].rename(
-            columns={prediction_column: "prediction"}).reset_index(drop=True).rename_axis(index="id")
+    def post_processing(self, df: pd.DataFrame):
+        df = df[["prediction_label"]].rename(
+            columns={"prediction_label": "prediction"}).reset_index(drop=True).rename_axis(index="id")
 
         df["prediction"] = df["prediction"].clip(lower=0)
         return df
