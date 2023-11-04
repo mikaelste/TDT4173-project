@@ -55,17 +55,17 @@ class Pipin:
     def __init__(self):
         pass
 
-    def get_combined_datasets(self,  randomize=False, data_sets: set = {"A", "B", "C"}, consecutive_threshold=6, normalize=False, group_by_hour=False, offset_years=False):
+    def get_combined_datasets(self,  randomize=False, data_sets: set = {"A", "B", "C"}, consecutive_threshold=6, normalize=False, group_by_hour=True, offset_years=False, unzip_date_feature=False):
         # get for location A, B and C and concatinate them
         if not data_sets.issubset({"A", "B", "C"}):
             raise Exception("set must contain A, B or C")
 
         df_a = self.get_data(
-            "A", consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour) if "A" in data_sets else pd.DataFrame()
+            "A", consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour, unzip_date_feature=unzip_date_feature) if "A" in data_sets else pd.DataFrame()
         df_b = self.get_data(
-            "B", consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour) if "B" in data_sets else pd.DataFrame()
+            "B", consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour, unzip_date_feature=unzip_date_feature) if "B" in data_sets else pd.DataFrame()
         df_c = self.get_data(
-            "C", consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour) if "C" in data_sets else pd.DataFrame()
+            "C", consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour, unzip_date_feature=unzip_date_feature) if "C" in data_sets else pd.DataFrame()
 
         dataSets = [df_a, df_b, df_c]
         location = ["A", "B", "C"]
@@ -82,7 +82,7 @@ class Pipin:
             df = df.sample(frac=1).reset_index(drop=True)
         return df
 
-    def get_data(self, location: str, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=False):
+    def get_data(self, location: str, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=True, unzip_date_feature=True):
         if location == "A":
             X_train_observed_x = X_train_observed_a
             X_train_estimated_x = X_train_estimated_a
@@ -110,7 +110,8 @@ class Pipin:
         if group_by_hour:
             X_train = self.grouped_by_hour(X_train)
         # rename the date_forecast column to time to merge with the target data
-        X_train = self.unzip_date_feature(X_train)
+        if unzip_date_feature:
+            X_train = self.unzip_date_feature(X_train)
         X_train.rename(columns={"date_forecast": "time"}, inplace=True)
 
         # normalize the data
@@ -146,6 +147,21 @@ class Pipin:
             df.loc[df["location:idx"] == loca,
                    "pv_measurement"] = df.loc[df["location:idx"] == loca, "pv_measurement"]*scale
         return df
+
+    def split_train_tune(self, df: pd.DataFrame):
+        df = df.copy()
+        df_estimated = df.loc[df["is_estimated:idx"] == 1]
+        df_observed = df.loc[df["is_estimated:idx"] == 0]
+
+        num_rows = len(df_estimated)
+        middle_index = num_rows // 2
+
+        df_estimated.sample(frac=1, random_state=42)
+        train_estimated = df.iloc[:middle_index]
+        tune = df.iloc[middle_index:]
+
+        train = pd.concat([df_observed, train_estimated])
+        return train, tune
 
     def get_combined_test_data(self,  data_sets: set = {"A", "B", "C"}):
         if not data_sets.issubset({"A", "B", "C"}):
