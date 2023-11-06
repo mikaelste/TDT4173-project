@@ -132,37 +132,6 @@ class Pipin:
 
         return merged
 
-    def scale_targets_in_dataset(self, df: pd.DataFrame, location: str):
-        locations_to_scale = list(
-            set(df["location:idx"].unique()) - set(location))
-        df = df.copy()
-        avg_targt_y = df.loc[df["location:idx"] ==
-                             location, "pv_measurement"].mean()
-        for loca in locations_to_scale:
-            # for all rows with location loca, scale the target with the average target
-            avg_targt_x = df.loc[df["location:idx"]
-                                 == loca, "pv_measurement"].mean()
-            scale = avg_targt_y/avg_targt_x
-
-            df.loc[df["location:idx"] == loca,
-                   "pv_measurement"] = df.loc[df["location:idx"] == loca, "pv_measurement"]*scale
-        return df
-
-    def split_train_tune(self, df: pd.DataFrame):
-        df = df.copy()
-        df_estimated = df.loc[df["is_estimated:idx"] == 1]
-        df_observed = df.loc[df["is_estimated:idx"] == 0]
-
-        num_rows = len(df_estimated)
-        middle_index = num_rows // 2
-
-        df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df.iloc[:middle_index]
-        tune = df.iloc[middle_index:]
-
-        train = pd.concat([df_observed, train_estimated])
-        return train, tune
-
     def get_combined_test_data(self,  data_sets: set = {"A", "B", "C"}):
         if not data_sets.issubset({"A", "B", "C"}):
             raise Exception("set must contain A, B or C")
@@ -321,6 +290,37 @@ class Pipin:
         selected_features = list(set(features) & set(important_features))
         return selected_features + ["pv_measurement"]
 
+    def scale_targets_in_dataset(self, df: pd.DataFrame, location: str):
+        locations_to_scale = list(
+            set(df["location:idx"].unique()) - set(location))
+        df = df.copy()
+        avg_targt_y = df.loc[df["location:idx"] ==
+                             location, "pv_measurement"].mean()
+        for loca in locations_to_scale:
+            # for all rows with location loca, scale the target with the average target
+            avg_targt_x = df.loc[df["location:idx"]
+                                 == loca, "pv_measurement"].mean()
+            scale = avg_targt_y/avg_targt_x
+
+            df.loc[df["location:idx"] == loca,
+                   "pv_measurement"] = df.loc[df["location:idx"] == loca, "pv_measurement"]*scale
+        return df
+
+    def split_train_tune(self, df: pd.DataFrame):
+        df = df.copy()
+        df_estimated = df.loc[df["is_estimated:idx"] == 1]
+        df_observed = df.loc[df["is_estimated:idx"] == 0]
+
+        num_rows = len(df_estimated)
+        middle_index = num_rows // 2
+
+        df_estimated.sample(frac=1, random_state=42)
+        train_estimated = df.iloc[:middle_index]
+        tune = df.iloc[middle_index:]
+
+        train = pd.concat([df_observed, train_estimated])
+        return train, tune
+
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
             PATH+"mats/submissions/lightgbm.csv")
@@ -369,14 +369,7 @@ important_features = [
     'precip_5min:mm',
     'wind_speed_10m:ms',
     'wind_speed_w_1000hPa:ms',
-    'snow_depth:cm',
-    'snow_melt_10min:mm',
-    'fresh_snow_3h:cm',
-    'fresh_snow_1h:cm',
-    'snow_water:kgm2',
     'super_cooled_liquid_water:kgm2',
-    'snow_density:kgm3',
-    'snow_drift:idx',
     'air_density_2m:kgm3',
     'pressure_100m:hPa',
     'pressure_50m:hPa',
@@ -386,5 +379,15 @@ important_features = [
     'is_day:idx',
     'is_in_shadow:idx',
     'elevation:m',
-    'location:idx'
+    'location:idx',
+
+    "snow_melt_10min:mm",
+    "snow_density:kgm3",
+    "fresh_snow_6h:cm",
+    "fresh_snow_1h:cm",
+    "snow_water:kgm2",
+    "fresh_snow_12h:cm",
+    "fresh_snow_3h:cm",
+    "fresh_snow_24h:cm",
+    "snow_depth:cm",
 ]
