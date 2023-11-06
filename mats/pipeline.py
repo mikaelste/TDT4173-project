@@ -108,6 +108,14 @@ class Pipin:
         # rename the date_forecast column to time to merge with the target data
         if unzip_date_feature:
             X_train = self.unzip_date_feature(X_train)
+
+        # distance from date_calc to date_forcast forecast in seconds
+        X_train["date_calc"] = pd.to_datetime(X_train["date_calc"])
+        X_train["calculated_ago"] = (
+            X_train["date_forcast"] - X_train["date_calc"]).dt.total_seconds()
+        X_train["calculated_ago"] = X_train["time_difference_seconds"].fillna(
+            0)
+
         X_train.rename(columns={"date_forecast": "time"}, inplace=True)
 
         if normalize:
@@ -116,7 +124,7 @@ class Pipin:
         # ––––––––––––––––––––– only for train data –––––––––––––––––––––
         if not Y_train_x.empty:
             Y_train_x = self.remove_consecutive_measurments(
-                Y_train_x, consecutive_threshold=consecutive_threshold, consecutive_threshold_for_zero=consecutive_threshold*3)
+                Y_train_x, consecutive_threshold=consecutive_threshold, consecutive_threshold_for_zero=30)
 
         # Merge the targets and features and remove bad targets
         if not Y_train_x.empty:
@@ -210,17 +218,6 @@ class Pipin:
                 dataset["time"] = dataset["time"] + pd.DateOffset(years=offset)
         return dfs
 
-    # def filter_for_dates_in_test_example(self, df: pd.DataFrame, location: str = None):
-    #     test_df = test_df_example
-    #     if location == "A" or location == "B" or location == "C":
-    #         test_df = test_df.loc[test_df["location"] == location]
-
-    #     test_df = test_df[["time"]]
-    #     test_df["time"] = pd.to_datetime(test_df["time"])
-
-    #     filter_on_time = df.merge(test_df, on="time", how="right")
-    #     return filter_on_time
-
     def get_categorical_features(self, df: pd.DataFrame, feature_selection=False):
         categorical_columns = [c for c in df.columns if ":idx" in c]
         if feature_selection:
@@ -229,7 +226,7 @@ class Pipin:
         return categorical_columns
 
     def get_irrelevant_features(self, df=None, feature_selection=False):
-        irrelevant = ["date_calc", "time", "consecutive_count"]
+        irrelevant = ["date_calc", "consecutive_count"]
         if df is None:
             return irrelevant
         if feature_selection:
@@ -250,8 +247,13 @@ class Pipin:
         return numerical_features
 
     def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast"):
-        df.groupby(pd.Grouper(key=date_column, freq="1H"))
-        return df
+        df = df.groupby(pd.Grouper(key=date_column, freq="1H")
+                        ).mean(numeric_only=True)
+        all_nan_mask = df.isnull().all(axis=1)
+        df = df[~all_nan_mask]
+        return df.reset_index()
+        # return df.groupby(pd.Grouper(key=date_column, freq="1H")
+        #                   ).mean().reset_index()
 
     def grouped_by_hour_old(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         def custom_agg_categorical(x):
@@ -293,6 +295,9 @@ class Pipin:
         return df
 
     def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12):
+        if consecutive_threshold < 2:
+            return df
+
         column_to_check = 'pv_measurement'
         mask = (df[column_to_check] != df[column_to_check].shift(2)).cumsum()
 
@@ -361,7 +366,7 @@ class Pipin:
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mats/submissions/lightgbm.csv")
+            PATH+"mats/submissions/big_gluon_best.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:
