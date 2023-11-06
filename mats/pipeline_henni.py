@@ -111,12 +111,18 @@ class Pipeline:
 
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
+
         if not targets.empty:
             df = self.merge_train_target(df, targets)
+        else:
+            all_nan_mask = df[df.columns.difference(
+                ["time"])].isnull().all(axis=1)
+            df = df[~all_nan_mask]
 
         # df.drop(["date_calc"], axis=1, inplace=True)
         df.drop(["time"], axis=1, inplace=True)
-        # df = self.absolute_values(df)
+        # can set absolute value for time columns
+        df = self.absolute_value_for_columns(df)
         return df
 
     # –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– helper funciton ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -186,20 +192,20 @@ class Pipeline:
     def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         df = df.groupby(pd.Grouper(key=date_column, freq="1H")
                         ).mean(numeric_only=True)
-        all_nan_mask = df.isnull().all(axis=1)
-        df = df[~all_nan_mask]
+        # all_nan_mask = df.isnull().all(axis=1)
+        # df = df[~all_nan_mask]
         return df.reset_index()
 
     def merge_train_target(self, x, y):
         # henning får med alle pv measurments selv om han merger på inner time. Fordi resample fyller nan rows for alle timer som ikke er i datasettet.
-        merged = pd.merge(x, y, on="time", how="right")
+        merged = pd.merge(x, y, on="time", how="inner")
         mask = merged["pv_measurement"].notna()
         merged = merged.loc[mask].reset_index(drop=True)
         return merged
 
-    def absolute_values(self, df: pd.DataFrame):
+    def absolute_value_for_columns(self, df: pd.DataFrame):
+        df = df.astype(float)
         df[df.columns] = df[df.columns].abs()
-        df = df.replace(-0.0, 0.0)
         return df
 
     def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12):

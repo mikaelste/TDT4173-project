@@ -19,7 +19,7 @@ class Master:
         df_stamped['hour'] = df_stamped[name_time_col].dt.hour
 
 # Drop the original datetime column
-        df_stamped.drop(name_time_col, axis=1, inplace=True)
+        # df_stamped.drop(name_time_col, axis=1, inplace=True)
 
 # Display the DataFrame
         return df_stamped
@@ -29,10 +29,11 @@ class Master:
         df_averaged = df.copy()
         df_averaged = pd.DataFrame(df_averaged)
         df_averaged[name_time_col] = pd.to_datetime(df_averaged[name_time_col])
+        # df_averaged["date_calc"] = df["date_calc"]
         df_averaged.set_index(name_time_col, inplace=True)
         df_resampled = df_averaged.resample('1H').mean()
         df_resampled.reset_index(inplace=True)
-
+        df_resampled["date_calc"] = df["date_calc"]
         return df_resampled
 
     def averaged_test(df, name_time_col):
@@ -150,6 +151,7 @@ class Master:
 
         # If you do not want to keep the 'time' column from target_df after the join,
         # you can drop it from the resulting DataFrame.
+        merged_df["date_forecast"] = merged_df["time"]
         merged_df.drop('time', axis=1, inplace=True)
 
         return merged_df
