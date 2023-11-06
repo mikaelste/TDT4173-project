@@ -35,24 +35,6 @@ class Master:
 
         return df_resampled
 
-    def averaged_redundant(df, name_time_col, column_to_sum):
-        df_averaged = df.copy()
-        df_averaged[name_time_col] = pd.to_datetime(df_averaged[name_time_col])
-        df_averaged.set_index(name_time_col, inplace=True)
-
-        # Resample and take the mean for the entire DataFrame
-        df_resampled = df_averaged.resample('1H').mean()
-
-        # Resample the specific column you want to sum over 15-minute intervals
-        sum_resampled = df_averaged[column_to_sum].resample('15T').sum()
-
-        # Adjust the 1-hour resampled DataFrame with the summed values for every 15 minutes
-        df_resampled[column_to_sum] = sum_resampled.resample('1H').sum()
-
-        df_resampled.reset_index(inplace=True)
-
-        return df_resampled
-
     def averaged_test(df, name_time_col):
         df_averaged = df.copy()
         df_averaged[name_time_col] = pd.to_datetime(df_averaged[name_time_col])
@@ -69,6 +51,24 @@ class Master:
         df_resampled[name_time_col] = pd.to_datetime(df_resampled['date'].astype(
             str) + ' ' + df_resampled['hour'].astype(str) + ':00:00')
         df_resampled.drop(columns=['date', 'hour'], inplace=True)
+
+        return df_resampled
+
+    def averaged_redundant(df, name_time_col, column_to_sum):
+        df_averaged = df.copy()
+        df_averaged[name_time_col] = pd.to_datetime(df_averaged[name_time_col])
+        df_averaged.set_index(name_time_col, inplace=True)
+
+        # Resample and take the mean for the entire DataFrame
+        df_resampled = df_averaged.resample('1H').mean()
+
+        # Resample the specific column you want to sum over 15-minute intervals
+        sum_resampled = df_averaged[column_to_sum].resample('15T').sum()
+
+        # Adjust the 1-hour resampled DataFrame with the summed values for every 15 minutes
+        df_resampled[column_to_sum] = sum_resampled.resample('1H').sum()
+
+        df_resampled.reset_index(inplace=True)
 
         return df_resampled
 

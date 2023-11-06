@@ -49,87 +49,11 @@ test_df_example = pd.read_csv(PATH + "test.csv")
 best_submission: pd.DataFrame = pd.read_csv(
     PATH + "mikael/submissions/fourth_submission.csv")
 
-optins = {
-    "randomize": False,
-    "consecutive_threshold": 6,
-    "normalize": False,
-    "group_by_hour": True,
-    "unzip_date_feature": True,
-}
-
-# make a options class with the options as attributes
-
-
-class Options:
-    randomize = False
-    consecutive_threshold = 6
-    normalize = False
-    group_by_hour = True
-    unzip_date_feature = True
-
-    def __init__(self, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=True, unzip_date_feature=True) -> None:
-        self.randomize = randomize
-        self.consecutive_threshold = consecutive_threshold
-        self.normalize = normalize
-        self.group_by_hour = group_by_hour
-        self.unzip_date_feature = unzip_date_feature
-
 
 class Pipin:
 
     def __init__(self):
         pass
-
-    def get_data(self, location: str, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=True, unzip_date_feature=True):
-        x, y = self.get_training_data_by_location(location)
-        return self.handle_data(x, Y_train_x=y, randomize=randomize, consecutive_threshold=consecutive_threshold, normalize=normalize, group_by_hour=group_by_hour, unzip_date_feature=unzip_date_feature)
-
-    def get_test_data(self, location: str,  normalize=False) -> pd.DataFrame:
-        if location == "A":
-            df = X_test_estimated_a
-        elif location == "B":
-            df = X_test_estimated_b
-        elif location == "C":
-            df = X_test_estimated_c
-        else:
-            raise Exception("location must be A, B or C")
-        return self.handle_data(df.copy(), normalize=normalize)
-
-    def handle_data(self, X_train, Y_train_x=pd.DataFrame(), randomize=False, consecutive_threshold=3, normalize=False, group_by_hour=True, unzip_date_feature=True):
-
-        # ––––––––––––––––––––– for test data and train data –––––––––––––––––––––
-        X_train["date_forecast"] = pd.to_datetime(
-            X_train["date_forecast"])
-        # add a column with the date_calc of the forecast
-        X_train = self.onehot_estimated(X_train)
-        # adjust feature data
-        if group_by_hour:
-            X_train = self.grouped_by_hour(X_train)
-        # rename the date_forecast column to time to merge with the target data
-        if unzip_date_feature:
-            X_train = self.unzip_date_feature(X_train)
-        X_train.rename(columns={"date_forecast": "time"}, inplace=True)
-
-        if normalize:
-            X_train = self.normalize(X_train)
-
-        # ––––––––––––––––––––– only for train data –––––––––––––––––––––
-        if not Y_train_x.empty:
-            Y_train_x = self.remove_consecutive_measurments(
-                Y_train_x, consecutive_threshold=consecutive_threshold, consecutive_threshold_for_zero=consecutive_threshold*3)
-
-        # Merge the targets and features and remove bad targets
-        if not Y_train_x.empty:
-            merged = pd.merge(X_train, Y_train_x, on="time", how="inner")
-            mask = merged["pv_measurement"].notna()
-            merged = merged.loc[mask].reset_index(drop=True)
-        else:
-            merged = X_train
-
-        if randomize:
-            merged = merged.sample(frac=1).reset_index(drop=True)
-
-        return merged
 
     def get_combined_datasets(self,  randomize=False, data_sets: set = {"A", "B", "C"}, consecutive_threshold=6, normalize=False, group_by_hour=True, offset_years=False, unzip_date_feature=False):
         # get for location A, B and C and concatinate them
@@ -151,10 +75,61 @@ class Pipin:
         df = pd.concat([df_a, df_b, df_c]).reset_index(drop=True)
         if randomize:
             df = df.sample(frac=1).reset_index(drop=True)
-        # place the target column at the end
-        df = df[[c for c in df if c not in ['pv_measurement']] +
-                ['pv_measurement']]
         return df
+
+    # def get_data()
+
+    def get_data(self, location: str, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=True, unzip_date_feature=True, pure_data=False):
+        if location == "A":
+            X_train_observed_x = X_train_observed_a
+            X_train_estimated_x = X_train_estimated_a
+            Y_train_x = Y_train_observed_a
+        elif location == "B":
+            X_train_observed_x = X_train_observed_b
+            X_train_estimated_x = X_train_estimated_b
+            Y_train_x = Y_train_observed_b
+        elif location == "C":
+            X_train_observed_x = X_train_observed_c
+            X_train_estimated_x = X_train_estimated_c
+            Y_train_x = Y_train_observed_c
+        else:
+            raise Exception("location must be A, B or C")
+
+        if pure_data:
+            return X_train_observed_x, X_train_estimated_x, Y_train_x
+
+        X_train = pd.concat(
+            [X_train_observed_x, X_train_estimated_x]).reset_index().drop(columns=["index"])
+        X_train["date_forecast"] = pd.to_datetime(
+            X_train["date_forecast"])
+
+        # add a column with the date_calc of the forecast
+        X_train = self.onehot_estimated(X_train)
+        # adjust feature data
+        if group_by_hour:
+            X_train = self.grouped_by_hour(X_train)
+        # rename the date_forecast column to time to merge with the target data
+        if unzip_date_feature:
+            X_train = self.unzip_date_feature(X_train)
+        X_train.rename(columns={"date_forecast": "time"}, inplace=True)
+
+        # normalize the data
+        if normalize:
+            X_train = self.normalize(X_train)
+
+        # clean the traget data
+        Y_train_x = self.remove_consecutive_measurments(
+            Y_train_x, consecutive_threshold=consecutive_threshold, consecutive_threshold_for_zero=consecutive_threshold*2)
+
+        # Merge the targets and features and remove bad targets
+        merged = pd.merge(X_train, Y_train_x, on="time", how="inner")
+        mask = merged["pv_measurement"].notna()
+        merged = merged.loc[mask].reset_index(drop=True)
+
+        if randomize:
+            merged = merged.sample(frac=1).reset_index(drop=True)
+
+        return merged
 
     def get_combined_test_data(self,  data_sets: set = {"A", "B", "C"}):
         if not data_sets.issubset({"A", "B", "C"}):
@@ -178,48 +153,51 @@ class Pipin:
 
         return df
 
-    # –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– helper funciton ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-    def get_training_data_by_location(self, location):
+    def get_test_data(self, location: str = None, normalize=False) -> pd.DataFrame:
         if location == "A":
-            X_train_observed_x = X_train_observed_a
-            X_train_estimated_x = X_train_estimated_a
-            Y_train_x = Y_train_observed_a
+            df = X_test_estimated_a
         elif location == "B":
-            X_train_observed_x = X_train_observed_b
-            X_train_estimated_x = X_train_estimated_b
-            Y_train_x = Y_train_observed_b
+            df = X_test_estimated_b
         elif location == "C":
-            X_train_observed_x = X_train_observed_c
-            X_train_estimated_x = X_train_estimated_c
-            Y_train_x = Y_train_observed_c
+            df = X_test_estimated_c
         else:
             raise Exception("location must be A, B or C")
-        train = pd.concat(
-            [X_train_observed_x, X_train_estimated_x]).reset_index(drop=True)
-        return train, Y_train_x
 
-    def add_location_to_datasets(self, dfs: list, locations: list,  offset_years=False):
-        if not set(locations).issubset({"A", "B", "C"}) or len(dfs) != len(locations):
+        df = self.grouped_by_hour(df)
+        df = self.unzip_date_feature(df)
+        df.rename(columns={"date_forecast": "time"}, inplace=True)
+        df = self.onehot_estimated(df)
+
+        df = self.filter_for_dates_in_test_example(df, location)
+        df.reset_index().drop(columns=["index"])
+
+        if normalize:
+            df = self.normalize(df)
+
+        return df
+
+    def add_location_to_datasets(self, dfs: list, locations: list, year_offset=False):
+        if not locations.issubset({"A", "B", "C"}) or len(dfs) != len(locations):
             raise Exception("set must contain A, B or C")
-        for location, dataset in zip(locations, dfs):
+        for location, dataset in zip(location, dfs):
             if dataset.empty:
                 continue
             dataset = self.onehot_location(dataset, location)
-            if offset_years:
+            if year_offset:
                 offset = 5*(ord(location)-ord("A"))
                 dataset["time"] = dataset["time"] + pd.DateOffset(years=offset)
         return dfs
 
-    # def filter_for_dates_in_test_example(self, df: pd.DataFrame, location: str = None):
-    #     test_df = test_df_example
-    #     if location == "A" or location == "B" or location == "C":
-    #         test_df = test_df.loc[test_df["location"] == location]
+    def filter_for_dates_in_test_example(self, df: pd.DataFrame, location: str = None):
+        test_df = test_df_example
+        if location == "A" or location == "B" or location == "C":
+            test_df = test_df.loc[test_df["location"] == location]
 
-    #     test_df = test_df[["time"]]
-    #     test_df["time"] = pd.to_datetime(test_df["time"])
+        test_df = test_df[["time"]]
+        test_df["time"] = pd.to_datetime(test_df["time"])
 
-    #     filter_on_time = df.merge(test_df, on="time", how="right")
-    #     return filter_on_time
+        filter_on_time = df.merge(test_df, on="time", how="right")
+        return filter_on_time
 
     def get_categorical_features(self, df: pd.DataFrame, feature_selection=False):
         categorical_columns = [c for c in df.columns if ":idx" in c]
@@ -250,7 +228,9 @@ class Pipin:
         return numerical_features
 
     def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast"):
-        df.groupby(pd.Grouper(key=date_column, freq="1H"))
+        df.set_index(date_column, inplace=True)
+        df = df.resample('1H').mean()
+        df.reset_index(inplace=True)
         return df
 
     def grouped_by_hour_old(self, df: pd.DataFrame, date_column: str = "date_forecast"):
@@ -267,7 +247,7 @@ class Pipin:
         categorical_columns = self.get_categorical_features(df)
         numeric_columns = list(
             set(df.columns) - set(categorical_columns) - {date_column})
-        X_train_group = df.groupby(pd.Grouper(key=date_column, freq="1H")).agg(
+        X_train_group = df.groupby(pd.Grouper(key=date_column, freq="1H", )).agg(
             {**{col: 'mean' for col in numeric_columns}, **{col: custom_agg_categorical for col in categorical_columns}}).reset_index()
         return X_train_group
 
