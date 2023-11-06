@@ -2,7 +2,7 @@
 import pandas as pd
 
 # Helper functions
-from functions import get_days_sinse_beginning_of_year, get_hours_of_day, remove_consecutive_measurments
+from manual.functions import get_days_sinse_beginning_of_year, get_hours_of_day, remove_consecutive_measurments
 
 # Types handling
 import numpy as np
