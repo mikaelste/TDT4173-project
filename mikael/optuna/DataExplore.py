@@ -1,10 +1,13 @@
 # Data handling
+from category_encoders import OrdinalEncoder
 import pandas as pd
 from sklearn.metrics import mean_absolute_error
 import optuna
 import numpy as np
 from sklearn.model_selection import train_test_split
 from catboost import CatBoostRegressor
+from sklearn.pipeline import Pipeline
+from feature_engine.timeseries.forecasting import LagFeatures
 
 # Data science
 from sklearn.preprocessing import MinMaxScaler
@@ -94,6 +97,7 @@ class Data:
     # @mats
     def unzip_date_feature(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         df[date_column] = pd.to_datetime(df[date_column])
+        df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["day_of_year"] = df[date_column].dt.day_of_year
         df['time_of_day'] = df[date_column].dt.hour + df['date_forecast'].dt.minute / 60
         df["hour"] = df[date_column].dt.hour
@@ -104,18 +108,47 @@ class Data:
 
         df['day_sin'] = np.sin(2 * np.pi * df['day_of_year'] / 365)
         df['day_cos'] = np.cos(2 * np.pi * df['day_of_year'] / 365)
-        df.drop(columns=[date_column, "day_of_year", "time_of_day"], inplace=True)
+        
+        df["minute_calc_diff"] = (df[date_column] - df["date_calc"]).dt.seconds / 60
+        df.drop(columns=[date_column, "date_calc", "day_of_year", "time_of_day"], inplace=True)
         return df
     
     def catboost(self):
-        y = self.frame[["pv_measurement"]]
-        
         X = self.unzip_date_feature(self.frame.copy())
+        X = X.loc[X["pv_measurement"].notna()]
         test = self.unzip_date_feature(self.test.copy())
+        y = X["pv_measurement"]
+        
+        # drop features
+        drop = ['wind_speed_u_10m:ms',
+                'wind_speed_v_10m:ms',
+                'wind_speed_w_1000hPa:ms']
+        X.drop(columns=drop)
+        test.drop(columns=drop)
+        
+        # drop where nans
+        X.dropna(axis=1, inplace=True)
+        test[X.columns.drop(["pv_measurement"])].dropna(axis=1, inplace=True)
+        
+        # Categorical data
+        cat_features = [c for c in X.columns if ":idx" in c]
+        enc = OrdinalEncoder()
+        X[cat_features] = enc.fit_transform(test[cat_features])
+        test[cat_features] = enc.transform(test[cat_features])
+        
+        no_cat_features = [c for c in X.columns if ":idx" not in c]
+        # Lag features
+        lag_cols = X[no_cat_features].select_dtypes(include=["number", "float", "int"]).columns.to_list()
+        lag_cols.remove("pv_measurement")
+        no_cat_features = [c for c in lag_cols if ":idx" not in c]
+        lag_f = LagFeatures(variables=no_cat_features, periods=4)
+        X_tr = lag_f.fit_transform(X[no_cat_features].select_dtypes(include=["number", "float", "int"]))
+        test_tr = lag_f.fit_transform(test[no_cat_features].select_dtypes(include=["number", "float", "int"]))
+        X[X_tr.columns] = X_tr
+        test[test_tr.columns] = test_tr
+        
         X = X.loc[X["pv_measurement"].notna()]
         X.drop(columns=["pv_measurement"], inplace=True)
-        X.dropna(axis=1, inplace=True)
-        test = test[X.columns]
         
         X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
         
@@ -123,12 +156,11 @@ class Data:
             params = {
                 "iterations": 1000,
                 "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.1, log=True),
-                "depth": trial.suggest_int("depth", 1, 10),
+                "depth": trial.suggest_int("depth", 4, 10),
                 "subsample": trial.suggest_float("subsample", 0.05, 1.0),
                 "colsample_bylevel": trial.suggest_float("colsample_bylevel", 0.05, 1.0),
                 "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
             }
-
             model = CatBoostRegressor(**params, silent=True)
             model.fit(X_train, y_train)
             predictions = model.predict(X_val)
