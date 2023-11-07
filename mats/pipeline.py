@@ -114,9 +114,12 @@ class Pipeline:
 
         # denne kjører bare når vi prossessere train data (med targets som parameter)
         if not targets.empty:
+            # targets = self.remove_consecutive_measurments(targets, 3)
             df = self.merge_train_target(df, targets)
 
         df.drop(["time"], axis=1, inplace=True)
+
+        # denne var ikke med i 148 3 modeller med gluon.
         df = self.absolute_values(df)
         return df
 
@@ -159,12 +162,12 @@ class Pipeline:
         # df["month"] = df["date_forecast"].dt.month
         return df
 
-    def add_time_since_calucation(self, df):
+    def add_time_since_calucation(self, df):  # denne er ikke så dum.
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["calculated_ago"] = (
             df["date_forecast"] - df["date_calc"]).dt.total_seconds()
         df["calculated_ago"] = df["calculated_ago"].fillna(
-            0)
+            0) / 60/30
         return df
 
     def onehot_estimated(self, df):
@@ -203,28 +206,60 @@ class Pipeline:
         df = df.replace(-0.0, 0.0)
         return df
 
-    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12):
+    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
         if consecutive_threshold < 2:
             return df
 
         column_to_check = 'pv_measurement'
-        mask = (df[column_to_check] != df[column_to_check].shift(2)).cumsum()
-
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
         df['consecutive_count'] = df.groupby(
             mask).transform('count')[column_to_check]
 
-        mask = (df['consecutive_count'] > consecutive_threshold)
-        mask_zero = (df['consecutive_count'] > consecutive_threshold_for_zero) & (
-            df[column_to_check] == 0)
-        df.drop(columns=["consecutive_count"], inplace=True)
+        mask_non_zero = ((df['consecutive_count'] >= consecutive_threshold)
+                         & (df["pv_measurement"] > 0))
+        mask_zero = ((df['consecutive_count'] >= consecutive_threshold_zero)
+                     & (df["pv_measurement"] == 0))
 
+        mask = mask_non_zero | mask_zero
+
+        removed_rows = df.copy().loc[mask]
         df = df.loc[~mask]
-        df = df.loc[~mask_zero]
+
+        if return_removed_rows:
+            return df, removed_rows
+        return df.reset_index(drop=True)
+
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
+        if consecutive_threshold < 2:
+            return df
+        column_to_check = 'pv_measurement'
+
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
+        df['consecutive_group'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        df["is_first_in_consecutive_group"] = False
+        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
+            1)
+
+        # masks to remove rows
+        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
+
+        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
+            df["pv_measurement"] == 0)
+        mask = mask_non_zero | mask_zero
+
+        removed_rows = df.loc[mask]
+        df = df.loc[~mask]
+
+        if return_removed_rows:
+            return df, removed_rows
         return df.reset_index(drop=True)
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mats/submissions/big_gluon_best.csv")
+            PATH+"mats/submissions/best_gluon_3.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:

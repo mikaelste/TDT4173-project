@@ -104,19 +104,22 @@ class Pipeline:
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["date_forecast"] = pd.to_datetime(df["date_forecast"])
 
-        df = self.add_time_since_calucation(df)
+        # df = self.add_time_since_calucation(df)
         df = self.onehot_estimated(df)
         df = self.unzip_date_feature(df)
-        df = self.grouped_by_hour(df)
+        df = self.grouped_by_hour_new(df)
 
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
 
         # denne kjører bare når vi prossessere train data (med targets som parameter)
         if not targets.empty:
+            targets = self.remove_consecutive_measurments(targets, 3, 24)
             df = self.merge_train_target(df, targets)
 
         df.drop(["time"], axis=1, inplace=True)
+
+        # denne var ikke med i 148 3 modeller med gluon.
         df = self.absolute_values(df)
         return df
 
@@ -159,12 +162,12 @@ class Pipeline:
         # df["month"] = df["date_forecast"].dt.month
         return df
 
-    def add_time_since_calucation(self, df):
+    def add_time_since_calucation(self, df):  # denne er ikke så dum.
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["calculated_ago"] = (
             df["date_forecast"] - df["date_calc"]).dt.total_seconds()
         df["calculated_ago"] = df["calculated_ago"].fillna(
-            0)/60/30
+            0) / 60/30
         return df
 
     def onehot_estimated(self, df):
@@ -191,6 +194,25 @@ class Pipeline:
         df = df[~all_nan_mask]
         return df.reset_index()
 
+    def grouped_by_hour_new(self, df: pd.DataFrame, date_column: str = "date_forecast"):
+        # Round the timestamps to the nearest hour and group by hour
+        df['rounded_hour'] = df[date_column] + pd.DateOffset(hours=0.75)
+        df['rounded_hour'] = df['rounded_hour'].dt.floor('H')
+        grouped_df = df.groupby(pd.Grouper(
+            key='rounded_hour', freq="1H")).mean(numeric_only=True)
+
+        # Remove rows with all NaN values
+        all_nan_mask = grouped_df.isnull().all(axis=1)
+        grouped_df = grouped_df[~all_nan_mask]
+
+        # Reset the index
+        grouped_df.reset_index(inplace=True)
+
+        # Rename the 'rounded_hour' column back to the original date_column
+        grouped_df.rename(columns={'rounded_hour': date_column}, inplace=True)
+
+        return grouped_df
+
     def merge_train_target(self, x, y):
         # henning får med alle pv measurments selv om han merger på inner time. Fordi resample fyller nan rows for alle timer som ikke er i datasettet.
         merged = pd.merge(x, y, on="time", how="right")
@@ -203,28 +225,60 @@ class Pipeline:
         df = df.replace(-0.0, 0.0)
         return df
 
-    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12):
+    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
         if consecutive_threshold < 2:
             return df
 
         column_to_check = 'pv_measurement'
-        mask = (df[column_to_check] != df[column_to_check].shift(2)).cumsum()
-
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
         df['consecutive_count'] = df.groupby(
             mask).transform('count')[column_to_check]
 
-        mask = (df['consecutive_count'] > consecutive_threshold)
-        mask_zero = (df['consecutive_count'] > consecutive_threshold_for_zero) & (
-            df[column_to_check] == 0)
-        df.drop(columns=["consecutive_count"], inplace=True)
+        mask_non_zero = ((df['consecutive_count'] >= consecutive_threshold)
+                         & (df["pv_measurement"] > 0))
+        mask_zero = ((df['consecutive_count'] >= consecutive_threshold_zero)
+                     & (df["pv_measurement"] == 0))
 
+        mask = mask_non_zero | mask_zero
+
+        removed_rows = df.copy().loc[mask]
         df = df.loc[~mask]
-        df = df.loc[~mask_zero]
+
+        if return_removed_rows:
+            return df, removed_rows
+        return df.reset_index(drop=True)
+
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
+        if consecutive_threshold < 2:
+            return df
+        column_to_check = 'pv_measurement'
+
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
+        df['consecutive_group'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        df["is_first_in_consecutive_group"] = False
+        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
+            1)
+
+        # masks to remove rows
+        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
+
+        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
+            df["pv_measurement"] == 0)
+        mask = mask_non_zero | mask_zero
+
+        removed_rows = df.loc[mask]
+        df = df.loc[~mask]
+
+        if return_removed_rows:
+            return df, removed_rows
         return df.reset_index(drop=True)
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mats/submissions/big_gluon_best.csv")
+            PATH+"mats/submissions/best_gluon_3.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:

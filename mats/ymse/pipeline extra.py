@@ -298,6 +298,7 @@ class Pipin:
         df_sub = df.loc[mask]
         df_sub['time'] = pd.to_datetime(df_sub['time'])
         print("sub", df_sub)
+        return df_sub
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
