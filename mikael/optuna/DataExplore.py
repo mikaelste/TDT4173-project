@@ -4,7 +4,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error
 import optuna
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold, train_test_split
 from catboost import CatBoostRegressor
 from sklearn.pipeline import Pipeline
 from feature_engine.timeseries.forecasting import LagFeatures
@@ -45,9 +45,9 @@ class Data:
             ignore_index=True,
         ).reset_index(drop=True)
         
-        self.frame = self.train.copy().merge(self.target.copy(), how="inner", on="date_forecast")
-        # self.set_dtypes()
-        self.drop_consequtives()
+        self.frame = self.train.copy().groupby(pd.Grouper(key="date_forecast", freq="1H")).mean()
+        self.frame = self.frame.copy().merge(self.target.copy(), how="inner", on="date_forecast")
+        self.frame = self.remove_consecutive_measurments(self.frame.copy())
         
     def set_dtypes(self):
         categorical_colummns = [c for c in self.frame.columns if "idx" in c]
@@ -59,15 +59,21 @@ class Data:
         self.test["date_calc"] = pd.to_datetime(self.test["date_calc"])
 
     # @mats
-    def drop_consequtives(self, consecutive_threshold=int(24)):
-        column_to_check = "pv_measurement"
-        df = self.frame
+    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=25, consecutive_threshold_for_zero=24):
+        column_to_check = 'pv_measurement'
         mask = (df[column_to_check] != df[column_to_check].shift(2)).cumsum()
 
-        df["consecutive_count"] = df.groupby(mask).transform("count")[column_to_check]
-        mask = df["consecutive_count"] > consecutive_threshold
+        df['consecutive_count'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        mask = (df['consecutive_count'] > consecutive_threshold)
+        mask_zero = (df['consecutive_count'] > consecutive_threshold_for_zero) & (
+            df[column_to_check] == 0)
         df.drop(columns=["consecutive_count"], inplace=True)
-        self.frame = df.loc[~mask]
+
+        df = df.loc[~mask]
+        df = df.loc[~mask_zero]
+        return df.reset_index(drop=True)
 
     def fit_predictions_to_submission_length(self, predictions: np.ndarray):
         submission_skeleton = pd.read_csv("../../test.csv")
@@ -110,7 +116,8 @@ class Data:
         df['day_cos'] = np.cos(2 * np.pi * df['day_of_year'] / 365)
         
         df["minute_calc_diff"] = (df[date_column] - df["date_calc"]).dt.seconds / 60
-        df.drop(columns=[date_column, "date_calc", "day_of_year", "time_of_day"], inplace=True)
+        df["minute_calc_diff"].fillna(0, inplace=True)
+        df.drop(columns=[date_column, "date_calc", "hour", "month", "day_of_year", "time_of_day"], inplace=True)
         return df
     
     def catboost(self):
@@ -150,9 +157,11 @@ class Data:
         X = X.loc[X["pv_measurement"].notna()]
         X.drop(columns=["pv_measurement"], inplace=True)
         
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+        # X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
         
         def objective(trial):
+            kf = KFold(n_splits=10, shuffle=True, random_state=1)
+
             params = {
                 "iterations": 1000,
                 "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.1, log=True),
@@ -161,13 +170,32 @@ class Data:
                 "colsample_bylevel": trial.suggest_float("colsample_bylevel", 0.05, 1.0),
                 "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
             }
-            model = CatBoostRegressor(**params, silent=True)
-            model.fit(X_train, y_train)
-            predictions = model.predict(X_val)
-            mae = mean_absolute_error(y_val, predictions)
+            # Initialize a list to store the mean absolute errors for each fold
+            mae_list = []
+
+            for fold, (train_idx, val_idx) in enumerate(kf.split(X), 1):
+                X_fold_train, X_fold_val = X.iloc[train_idx], X.iloc[val_idx]
+                y_fold_train, y_fold_val = y.iloc[train_idx], y.iloc[val_idx]
+
+                print(f"Training Fold {fold}...")
+                model = CatBoostRegressor(**params, silent=True)
+                model.fit(X_fold_train, y_fold_train)
+                predictions = model.predict(X_fold_val)
+                mae_fold = mean_absolute_error(y_fold_val, predictions)
+                mae_list.append(mae_fold)
+                print(f"Fold {fold} MAE: {mae_fold}")
+
+            # Calculate the mean of the mean absolute errors for all folds
+            mae = sum(mae_list) / len(mae_list)
+            print(f"Mean MAE for all Folds: {mae}")
             return mae
-        
-        study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=1)
+
+        # Create an Optuna study
+        study = optuna.create_study(direction="minimize")
+
+        # Optimize the objective function
+        print("Optimizing hyperparameters...")
+        study.optimize(objective, n_trials=40)
+        print("Optimization complete!")
         
         return CatBoostRegressor(**study.best_params).fit(X, y).predict(test)
