@@ -111,10 +111,11 @@ class Pipeline:
 
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
+
+        # denne kjører bare når vi prossessere train data (med targets som parameter)
         if not targets.empty:
             df = self.merge_train_target(df, targets)
 
-        # df.drop(["date_calc"], axis=1, inplace=True)
         df.drop(["time"], axis=1, inplace=True)
         df = self.absolute_values(df)
         return df
