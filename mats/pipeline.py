@@ -229,6 +229,11 @@ class Pipeline:
             return df, removed_rows
         return df.reset_index(drop=True)
 
+    def lag_features_by_1_hour(df, columns_to_lag):
+        lag_columns = [c for c in df.columns if "_1h:" in c]
+        df[lag_columns] = df[lag_columns].shift(1)
+        return df
+
     def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
         if consecutive_threshold < 2:
             return df
@@ -252,6 +257,9 @@ class Pipeline:
 
         removed_rows = df.loc[mask]
         df = df.loc[~mask]
+
+        df.drop(["consecutive_group", "is_first_in_consecutive_group"],
+                axis=1, inplace=True)
 
         if return_removed_rows:
             return df, removed_rows

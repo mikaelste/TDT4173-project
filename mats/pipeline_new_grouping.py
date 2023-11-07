@@ -243,7 +243,7 @@ class Pipeline:
 
         removed_rows = df.copy().loc[mask]
         df = df.loc[~mask]
-
+        df.drop(["consecutive_count"], axis=1, inplace=True)
         if return_removed_rows:
             return df, removed_rows
         return df.reset_index(drop=True)
