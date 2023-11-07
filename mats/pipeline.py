@@ -116,7 +116,7 @@ class Pipeline:
 
         # df.drop(["date_calc"], axis=1, inplace=True)
         df.drop(["time"], axis=1, inplace=True)
-        # df = self.absolute_values(df)
+        df = self.absolute_values(df)
         return df
 
     # –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– helper funciton ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
