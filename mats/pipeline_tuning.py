@@ -98,7 +98,9 @@ class Pipeline:
 
     def get_test_data(self, location: str) -> pd.DataFrame:
         test_data = self.get_test_data_by_location(location)
-        return self.handle_data(test_data)
+        df = self.handle_data(test_data)
+        df.drop(["date_forecast"], axis=1, inplace=True)
+        return df
 
     def handle_data(self, df, targets=pd.DataFrame(), keeptime=False):
         df["date_calc"] = pd.to_datetime(df["date_calc"])
@@ -109,14 +111,14 @@ class Pipeline:
         df = self.unzip_date_feature(df)
         df = self.grouped_by_hour(df)
 
-        df["time"] = df["date_forecast"]
-        df.drop(["date_forecast"], axis=1, inplace=True)
-
+        # denne kjører bare når vi prossessere train data (med targets som parameter)
         if not targets.empty:
+            # targets = self.remove_consecutive_measurments(targets, 3)
+            targets.rename(columns={"time": "date_forecast"}, inplace=True)
             df = self.merge_train_target(df, targets)
 
-        df.drop(columns=["time"], axis=1, inplace=True)
-
+        # df.drop(["date_forecast"], axis=1, inplace=True)
+        # denne var ikke med i 148 3 modeller med gluon.
         df = self.absolute_values(df)
         return df
 
@@ -193,13 +195,13 @@ class Pipeline:
 
     def merge_train_target(self, x, y):
         # henning får med alle pv measurments selv om han merger på inner time. Fordi resample fyller nan rows for alle timer som ikke er i datasettet.
-        merged = pd.merge(x, y, on="time", how="right")
+        merged = pd.merge(x, y, on="date_forecast", how="right")
         mask = merged["pv_measurement"].notna()
         merged = merged.loc[mask].reset_index(drop=True)
         return merged
 
     def absolute_values(self, df: pd.DataFrame):
-        columns = list(df.columns)
+        columns = list(set(df.columns) - set(["date_forecast", "time"]))
         df[columns] = df[columns].abs()
         df = df.replace(-0.0, 0.0)
         return df
