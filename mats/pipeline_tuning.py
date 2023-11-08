@@ -1,6 +1,7 @@
 import pandas as pd
 from sklearn.metrics import mean_absolute_error
 import os
+from sklearn.model_selection import StratifiedShuffleSplit
 
 current_dir = os.getcwd()
 print("Current working directory:", current_dir)
@@ -279,21 +280,6 @@ class Pipeline:
         return mean_absolute_error(
             best_submission["prediction"], df["prediction"])
 
-    def split_train_tune(self, df: pd.DataFrame):
-        df = df.copy()
-        df_estimated = df.loc[df["estimated"] == 1]
-        df_observed = df.loc[df["estimated"] == 0]
-
-        num_rows = len(df_estimated)
-        middle_index = num_rows // 2
-
-        df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df_estimated.iloc[:middle_index]
-        tune = df_estimated.iloc[middle_index:]
-
-        train = pd.concat([df_observed, train_estimated])
-        return train, tune
-
     def drop_columns(self, df: pd.DataFrame):
         drop = [
             "wind_speed_w_1000hPa:ms",
@@ -303,6 +289,26 @@ class Pipeline:
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
         return df
+
+    def split_train_tune(self, df: pd.DataFrame):
+        df = df.copy()
+        df_estimated = df.loc[df["estimated"] == 1]
+        df_observed = df.loc[df["estimated"] == 0]
+
+        train_estimated, tune = self.split_train_tune_stratified(
+            df_estimated, test_size=0.5)
+
+        train = pd.concat([df_observed, train_estimated])
+        return train, tune
+
+    def split_train_tune_stratified(self, df: pd.DataFrame, test_size=0.2):
+        sss = StratifiedShuffleSplit(
+            n_splits=1, test_size=test_size, random_state=42)
+        y_np = df['pv_measurment'].values
+        for train_index, test_index in sss.split(df.copy(), y_np):
+            X_train, X_test = df[train_index], df[test_index]
+
+        return X_train, X_test
 
     def find_min_max_date_in_test(self) -> list:
         locations = ["A", "B", "C"]

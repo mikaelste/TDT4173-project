@@ -209,7 +209,7 @@ class Pipeline:
         df[lag_columns] = df[lag_columns].shift(1)
         return df
 
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False, retrun_counted=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, retrun_counted=False):
         if consecutive_threshold < 2:
             return df
         column_to_check = 'pv_measurement'
@@ -222,6 +222,7 @@ class Pipeline:
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
         if retrun_counted:
+            # Dette er for feilsøking
             return df
 
         # masks to remove rows
@@ -232,14 +233,11 @@ class Pipeline:
             df["pv_measurement"] == 0)
         mask = mask_non_zero | mask_zero
 
-        removed_rows = df.loc[mask]
         df = df.loc[~mask]
 
         df = df.drop(columns=["consecutive_group",
                      "is_first_in_consecutive_group"])
 
-        if return_removed_rows:
-            return df, removed_rows
         return df.reset_index(drop=True)
 
     def compare_mae(self, df: pd.DataFrame):
@@ -278,7 +276,7 @@ class Pipeline:
             "wind_speed_v_10m:ms",  # same as above
             # "snow_drift:idx",
             # "snow_density:kgm3",
-            # "snow_melt_10min:mm", # veldig få verdier
+            # "snow_melt_10min:mm",  # veldig få verdier
         ]
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
@@ -292,7 +290,7 @@ class Pipeline:
             "wind_speed_v_10m:ms",  # same as above
             "snow_drift:idx",
             "snow_density:kgm3",
-            "snow_melt_10min:mm",  # veldig få verdier
+            # "snow_melt_10min:mm",  # veldig få verdier
         ]
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
