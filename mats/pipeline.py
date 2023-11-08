@@ -209,9 +209,10 @@ class Pipeline:
         df[lag_columns] = df[lag_columns].shift(1)
         return df
 
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, retrun_counted=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed=False):
         if consecutive_threshold < 2:
             return df
+
         column_to_check = 'pv_measurement'
 
         mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
@@ -221,17 +222,17 @@ class Pipeline:
         df["is_first_in_consecutive_group"] = False
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
-        if retrun_counted:
-            # Dette er for feilsøking
-            return df
 
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
             df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
 
         mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0)
+            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False)
         mask = mask_non_zero | mask_zero
+
+        if return_removed:
+            return df[mask]
 
         df = df.loc[~mask]
 
