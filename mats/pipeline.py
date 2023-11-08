@@ -287,11 +287,33 @@ class Pipeline:
         middle_index = num_rows // 2
 
         df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df.iloc[:middle_index]
-        tune = df.iloc[middle_index:]
+        train_estimated = df_estimated.iloc[:middle_index]
+        tune = df_estimated.iloc[middle_index:]
 
         train = pd.concat([df_observed, train_estimated])
         return train, tune
+
+    def find_min_max_date_in_test(self) -> list:
+        locations = ["A", "B", "C"]
+        dates = []
+        for loc in locations:
+            df = self.get_test_data_by_location(loc)
+            df["date_forecast"] = pd.to_datetime(df["date_forecast"])
+            dates.append((df["date_forecast"].min(),
+                         df["date_forecast"].max()))
+        return dates
+
+    def split_train_summer_2021(self, df: pd.DataFrame):
+        dates = self.find_min_max_date_in_test()
+        # set the dates to the summer of 2021
+        dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
+                 for date in dates]
+
+        summer2021 = df[(df["date_forecast"] >= dates[0][0]) & (
+            df["date_forecast"] <= dates[0][1])]
+
+        train = df.index.difference(summer2021.index)
+        return train, summer2021
 
     def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
         df = df[[prediction_column]].rename(
