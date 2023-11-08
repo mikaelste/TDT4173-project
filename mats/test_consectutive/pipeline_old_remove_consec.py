@@ -2,12 +2,13 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error
 import os
 
-current_dir = os.getcwd()
+current_dir = os.getcwd() + "../"
 print("Current working directory:", current_dir)
 
 
-PATH = "/Users/matsalexander/Desktop/Forest Gump/"
-# PATH = "../"
+# PATH = "/Users/matsalexander/Desktop/Forest Gump/"
+# PATH = "/Users/henningdropping/Documents/GitHub/Forest-Gump//"
+PATH = "../../"
 # Estimate
 X_train_estimated_a: pd.DataFrame = pd.read_parquet(
     PATH + 'A/X_train_estimated.parquet')
@@ -204,7 +205,7 @@ class Pipeline:
         df = df.replace(-0.0, 0.0)
         return df
 
-    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12):
+    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12, fuck=False):
         if consecutive_threshold < 2:
             return df
 
@@ -213,10 +214,16 @@ class Pipeline:
 
         df['consecutive_count'] = df.groupby(
             mask).transform('count')[column_to_check]
-
+        return df
         mask = (df['consecutive_count'] > consecutive_threshold)
         mask_zero = (df['consecutive_count'] > consecutive_threshold_for_zero) & (
             df[column_to_check] == 0)
+
+        if fuck:
+            consec = df[mask]
+            consec_zero = df[mask_zero]
+            return consec, consec_zero
+
         df.drop(columns=["consecutive_count"], inplace=True)
 
         df = df.loc[~mask]

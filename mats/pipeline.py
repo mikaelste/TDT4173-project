@@ -204,36 +204,12 @@ class Pipeline:
         df = df.replace(-0.0, 0.0)
         return df
 
-    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
-        if consecutive_threshold < 2:
-            return df
-
-        column_to_check = 'pv_measurement'
-        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
-        df['consecutive_count'] = df.groupby(
-            mask).transform('count')[column_to_check]
-
-        mask_non_zero = ((df['consecutive_count'] >= consecutive_threshold)
-                         & (df["pv_measurement"] > 0))
-        mask_zero = ((df['consecutive_count'] >= consecutive_threshold_zero)
-                     & (df["pv_measurement"] == 0))
-
-        mask = mask_non_zero | mask_zero
-
-        removed_rows = df.copy().loc[mask]
-        df = df.loc[~mask]
-        df = df.drop(columns=["consecutive_count"])
-
-        if return_removed_rows:
-            return df, removed_rows
-        return df.reset_index(drop=True)
-
     def lag_features_by_1_hour(df, columns_to_lag):
         lag_columns = [c for c in df.columns if "_1h:" in c]
         df[lag_columns] = df[lag_columns].shift(1)
         return df
 
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False, retrun_counted=False):
         if consecutive_threshold < 2:
             return df
         column_to_check = 'pv_measurement'
@@ -245,6 +221,8 @@ class Pipeline:
         df["is_first_in_consecutive_group"] = False
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
+        if retrun_counted:
+            return df
 
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
@@ -294,9 +272,27 @@ class Pipeline:
 
     def drop_columns(self, df: pd.DataFrame):
         drop = [
+            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
             "wind_speed_w_1000hPa:ms",
-            "wind_speed_u_10m:ms",
-            "wind_speed_v_10m:ms"
+            "wind_speed_u_10m:ms",  # same as above
+            "wind_speed_v_10m:ms",  # same as above
+            # "snow_drift:idx",
+            # "snow_density:kgm3",
+            # "snow_melt_10min:mm", # veldig få verdier
+        ]
+        shared_columns = list(set(df.columns) & set(drop))
+        df = df.drop(columns=shared_columns)
+        return df
+
+    def drop_columns_new(self, df: pd.DataFrame):
+        drop = [
+            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
+            "wind_speed_w_1000hPa:ms",
+            "wind_speed_u_10m:ms",  # same as above
+            "wind_speed_v_10m:ms",  # same as above
+            "snow_drift:idx",
+            "snow_density:kgm3",
+            "snow_melt_10min:mm",  # veldig få verdier
         ]
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
