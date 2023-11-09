@@ -2,11 +2,13 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error
 import os
 
-current_dir = os.getcwd()
+current_dir = os.getcwd() + "../"
 print("Current working directory:", current_dir)
 
 
-PATH = "/Users/matsalexander/Desktop/Forest Gump/"
+# PATH = "/Users/matsalexander/Desktop/Forest Gump/"
+# PATH = "/Users/henningdropping/Documents/GitHub/Forest-Gump//"
+PATH = "../../"
 # Estimate
 X_train_estimated_a: pd.DataFrame = pd.read_parquet(
     PATH + 'A/X_train_estimated.parquet')
@@ -92,15 +94,15 @@ class Pipeline:
         return df[[c for c in df if c not in ['pv_measurement']] +  # pv measurement is the target and is at the end columns
                   ['pv_measurement']]
 
-    def get_data(self, location: str, keeptime=False) -> pd.DataFrame:
+    def get_data(self, location: str) -> pd.DataFrame:
         train, targets = self.get_training_data_by_location(location)
-        return self.handle_data(train, targets, keeptime=keeptime)
+        return self.handle_data(train, targets)
 
     def get_test_data(self, location: str) -> pd.DataFrame:
         test_data = self.get_test_data_by_location(location)
         return self.handle_data(test_data)
 
-    def handle_data(self, df, targets=pd.DataFrame(), keeptime=False):
+    def handle_data(self, df, targets=pd.DataFrame()):
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["date_forecast"] = pd.to_datetime(df["date_forecast"])
 
@@ -112,11 +114,11 @@ class Pipeline:
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
 
+        # denne kjører bare når vi prossessere train data (med targets som parameter)
         if not targets.empty:
             df = self.merge_train_target(df, targets)
 
-        df.drop(columns=["time"], axis=1, inplace=True)
-
+        df.drop(["time"], axis=1, inplace=True)
         df = self.absolute_values(df)
         return df
 
@@ -159,12 +161,12 @@ class Pipeline:
         # df["month"] = df["date_forecast"].dt.month
         return df
 
-    def add_time_since_calucation(self, df):  # denne er ikke så dum.
+    def add_time_since_calucation(self, df):
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["calculated_ago"] = (
             df["date_forecast"] - df["date_calc"]).dt.total_seconds()
         df["calculated_ago"] = df["calculated_ago"].fillna(
-            0) / 60/30
+            0)
         return df
 
     def onehot_estimated(self, df):
@@ -199,88 +201,35 @@ class Pipeline:
         return merged
 
     def absolute_values(self, df: pd.DataFrame):
-        columns = list(df.columns)
-        df[columns] = df[columns].abs()
+        df[df.columns] = df[df.columns].abs()
         df = df.replace(-0.0, 0.0)
         return df
 
-    def lag_features_by_1_hour(df, columns_to_lag):
-        lag_columns = [c for c in df.columns if "_1h:" in c]
-        df[lag_columns] = df[lag_columns].shift(1)
-        return df
-
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
+    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=6, consecutive_threshold_for_zero=12, return_removed=False):
         if consecutive_threshold < 2:
             return df
 
         column_to_check = 'pv_measurement'
+        mask = (df[column_to_check] != df[column_to_check].shift(2)).cumsum()
 
-        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
         df['consecutive_group'] = df.groupby(
             mask).transform('count')[column_to_check]
-
-        df["is_first_in_consecutive_group"] = False
-        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
-            1)
-
-        # masks to remove rows
-        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
-            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
-
-        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False)
-
-        mask = mask_non_zero | mask_zero
+        mask = (df['consecutive_group'] > consecutive_threshold)
+        mask_zero = (df['consecutive_group'] > consecutive_threshold_for_zero) & (
+            df[column_to_check] == 0)
 
         if return_removed:
-            return df[mask]
+            return df[mask | mask_zero]
+
+        df.drop(columns=["consecutive_group"], inplace=True)
 
         df = df.loc[~mask]
-
-        df = df.drop(columns=["consecutive_group",
-                     "is_first_in_consecutive_group"])
-
-        return df.reset_index(drop=True)
-
-    def remove_consecutive_measurments_new_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
-        if consecutive_threshold < 2:
-            return df
-
-        column_to_check = 'pv_measurement'
-
-        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
-        df['consecutive_group'] = df.groupby(
-            mask).transform('count')[column_to_check]
-
-        df["is_first_in_consecutive_group"] = False
-        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
-            1)
-
-        # masks to remove rows
-        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
-            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
-
-        tol = 10
-        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0) & (df["direct_rad:W"] > tol)
-
-        mask_zero_no_rad = (df['consecutive_group'] >= consecutive_threshold_zero_no_rad) & (
-            df["pv_measurement"] == 0) & (df["direct_rad:W"] < tol)
-        mask = mask_non_zero | mask_zero | mask_zero_no_rad
-
-        if return_removed:
-            return df[mask]
-
-        df = df.loc[~mask]
-
-        df = df.drop(columns=["consecutive_group",
-                     "is_first_in_consecutive_group"])
-
+        df = df.loc[~mask_zero]
         return df.reset_index(drop=True)
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mats/submissions/gluon_3_remove_consecutive_measurements_66.csv")
+            PATH+"mats/submissions/big_gluon_best.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:
@@ -300,61 +249,11 @@ class Pipeline:
         middle_index = num_rows // 2
 
         df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df_estimated.iloc[:middle_index]
-        tune = df_estimated.iloc[middle_index:]
+        train_estimated = df.iloc[:middle_index]
+        tune = df.iloc[middle_index:]
 
         train = pd.concat([df_observed, train_estimated])
         return train, tune
-
-    def drop_columns(self, df: pd.DataFrame):
-        drop = [
-            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
-            "wind_speed_w_1000hPa:ms",
-            "wind_speed_u_10m:ms",  # same as above
-            "wind_speed_v_10m:ms",  # same as above
-            # "snow_drift:idx",
-            # "snow_density:kgm3",
-            # "snow_melt_10min:mm",  # veldig få verdier
-        ]
-        shared_columns = list(set(df.columns) & set(drop))
-        df = df.drop(columns=shared_columns)
-        return df
-
-    def drop_columns_new(self, df: pd.DataFrame):
-        drop = [
-            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
-            "wind_speed_w_1000hPa:ms",
-            "wind_speed_u_10m:ms",  # same as above
-            "wind_speed_v_10m:ms",  # same as above
-            "snow_drift:idx",
-            "snow_density:kgm3",
-            # "snow_melt_10min:mm",  # veldig få verdier
-        ]
-        shared_columns = list(set(df.columns) & set(drop))
-        df = df.drop(columns=shared_columns)
-        return df
-
-    def find_min_max_date_in_test(self) -> list:
-        locations = ["A", "B", "C"]
-        dates = []
-        for loc in locations:
-            df = self.get_test_data_by_location(loc)
-            df["date_forecast"] = pd.to_datetime(df["date_forecast"])
-            dates.append((df["date_forecast"].min(),
-                         df["date_forecast"].max()))
-        return dates
-
-    def split_train_summer_2021(self, df: pd.DataFrame):
-        dates = self.find_min_max_date_in_test()
-        # set the dates to the summer of 2021
-        dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
-                 for date in dates]
-
-        summer2021 = df[(df["date_forecast"] >= dates[0][0]) & (
-            df["date_forecast"] <= dates[0][1])]
-
-        train = df[~df.index.isin(summer2021.index)]
-        return train, summer2021
 
     def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
         df = df[[prediction_column]].rename(
