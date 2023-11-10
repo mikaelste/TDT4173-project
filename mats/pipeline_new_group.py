@@ -92,34 +92,31 @@ class Pipeline:
         return df[[c for c in df if c not in ['pv_measurement']] +  # pv measurement is the target and is at the end columns
                   ['pv_measurement']]
 
-    def get_data(self, location: str) -> pd.DataFrame:
+    def get_data(self, location: str, keeptime=False) -> pd.DataFrame:
         train, targets = self.get_training_data_by_location(location)
-        return self.handle_data(train, targets)
+        return self.handle_data(train, targets, keeptime=keeptime)
 
     def get_test_data(self, location: str) -> pd.DataFrame:
         test_data = self.get_test_data_by_location(location)
         return self.handle_data(test_data)
 
-    def handle_data(self, df, targets=pd.DataFrame()):
+    def handle_data(self, df, targets=pd.DataFrame(), keeptime=False):
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["date_forecast"] = pd.to_datetime(df["date_forecast"])
 
-        # df = self.add_time_since_calucation(df)
-        df = self.onehot_estimated(df)
+        df = self.drop_columns(df)
+        df = self.grouped_by_hour(df)
+
         df = self.unzip_date_feature(df)
-        df = self.grouped_by_hour_new(df)
+        df = self.onehot_estimated(df)
 
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
-
-        # denne kjører bare når vi prossessere train data (med targets som parameter)
         if not targets.empty:
-            targets = self.remove_consecutive_measurments(targets, 3, 24)
             df = self.merge_train_target(df, targets)
 
-        df.drop(["time"], axis=1, inplace=True)
+        df.drop(columns=["time"], axis=1, inplace=True)
 
-        # denne var ikke med i 148 3 modeller med gluon.
         df = self.absolute_values(df)
         return df
 
@@ -176,6 +173,7 @@ class Pipeline:
         estimated_mask = df["date_calc"].notna()
         df.loc[estimated_mask, "estimated"] = 1
         df.loc[~estimated_mask, "observed"] = 1
+        df.drop(columns=["date_calc"], inplace=True)
         return df
 
     def onehot_location(self, df, location):
@@ -187,31 +185,42 @@ class Pipeline:
             df["A"], df["B"], df["C"] = 0, 0, 1
         return df
 
-    def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast"):
+    def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast") -> pd.DataFrame:
+        # Group by hour and aggregate the values into lists for all columns
+        df['date_hour'] = df[date_column].dt.to_period('H')
+        df["min"] = df[date_column].dt.minute
+        df.drop(columns=[date_column], inplace=True)
+
+        # Use pivot_table to combine rows with the same date and hour
+        pivot_df = df.pivot_table(index=['date_hour'], columns=[
+                                  'min'], values=df.columns, aggfunc='first')
+        # rename the date_hour to date_forecast
+        # pivot_df.columns = [f'{col[0]}_{col[1]}' if col[1]
+        #                     else col[0] for col in pivot_df.columns]
+
+        pivot_df.index.names = [date_column]
+
+        # Reset index to make 'date' a regular column
+        pivot_df.columns = pivot_df.columns.to_flat_index()
+        pivot_df.reset_index(inplace=True)
+
+        pivot_df["date_forecast"] = pivot_df["date_forecast"].dt.to_timestamp()
+
+        pivot_df["date_calc"] = pivot_df[('date_calc', 0)]
+        pivot_df.drop(columns=[
+            ('date_calc', c) for c in range(0, 60, 15)
+        ], inplace=True)
+
+        pivot_df.columns = [str(col) for col in pivot_df.columns]
+
+        return pivot_df
+
+    def grouped_by_hour_old(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         df = df.groupby(pd.Grouper(key=date_column, freq="1H")
                         ).mean(numeric_only=True)
         all_nan_mask = df.isnull().all(axis=1)
         df = df[~all_nan_mask]
         return df.reset_index()
-
-    def grouped_by_hour_new(self, df: pd.DataFrame, date_column: str = "date_forecast"):
-        # Round the timestamps to the nearest hour and group by hour
-        df['rounded_hour'] = df[date_column] + pd.DateOffset(hours=0.75)
-        df['rounded_hour'] = df['rounded_hour'].dt.floor('H')
-        grouped_df = df.groupby(pd.Grouper(
-            key='rounded_hour', freq="1H")).mean(numeric_only=True)
-
-        # Remove rows with all NaN values
-        all_nan_mask = grouped_df.isnull().all(axis=1)
-        grouped_df = grouped_df[~all_nan_mask]
-
-        # Reset the index
-        grouped_df.reset_index(inplace=True)
-
-        # Rename the 'rounded_hour' column back to the original date_column
-        grouped_df.rename(columns={'rounded_hour': date_column}, inplace=True)
-
-        return grouped_df
 
     def merge_train_target(self, x, y):
         # henning får med alle pv measurments selv om han merger på inner time. Fordi resample fyller nan rows for alle timer som ikke er i datasettet.
@@ -221,36 +230,20 @@ class Pipeline:
         return merged
 
     def absolute_values(self, df: pd.DataFrame):
-        df[df.columns] = df[df.columns].abs()
+        columns = list(df.columns)
+        df[columns] = df[columns].abs()
         df = df.replace(-0.0, 0.0)
         return df
 
-    def remove_consecutive_measurments(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
+    def lag_features_by_1_hour(df, columns_to_lag):
+        lag_columns = [c for c in df.columns if "_1h:" in c]
+        df[lag_columns] = df[lag_columns].shift(1)
+        return df
+
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12,  return_removed=False):
         if consecutive_threshold < 2:
             return df
 
-        column_to_check = 'pv_measurement'
-        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
-        df['consecutive_count'] = df.groupby(
-            mask).transform('count')[column_to_check]
-
-        mask_non_zero = ((df['consecutive_count'] >= consecutive_threshold)
-                         & (df["pv_measurement"] > 0))
-        mask_zero = ((df['consecutive_count'] >= consecutive_threshold_zero)
-                     & (df["pv_measurement"] == 0))
-
-        mask = mask_non_zero | mask_zero
-
-        removed_rows = df.copy().loc[mask]
-        df = df.loc[~mask]
-        df.drop(["consecutive_count"], axis=1, inplace=True)
-        if return_removed_rows:
-            return df, removed_rows
-        return df.reset_index(drop=True)
-
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed_rows=False):
-        if consecutive_threshold < 2:
-            return df
         column_to_check = 'pv_measurement'
 
         mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
@@ -263,22 +256,62 @@ class Pipeline:
 
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
-            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
 
         mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0)
+            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False)
+
         mask = mask_non_zero | mask_zero
 
-        removed_rows = df.loc[mask]
+        if return_removed:
+            return df[mask]
+
         df = df.loc[~mask]
 
-        if return_removed_rows:
-            return df, removed_rows
+        df = df.drop(columns=["consecutive_group",
+                     "is_first_in_consecutive_group"])
+
+        return df.reset_index(drop=True)
+
+    def remove_consecutive_measurments_new_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
+        if consecutive_threshold < 2:
+            return df
+
+        column_to_check = 'pv_measurement'
+
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
+        df['consecutive_group'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        df["is_first_in_consecutive_group"] = False
+        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
+            1)
+
+        # masks to remove rows
+        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
+
+        tol = 10
+        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] > tol)
+
+        mask_zero_no_rad = (df['consecutive_group'] >= consecutive_threshold_zero_no_rad) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] < tol)
+        mask = mask_non_zero | mask_zero | mask_zero_no_rad
+
+        if return_removed:
+            return df[mask]
+
+        df = df.loc[~mask]
+
+        df = df.drop(columns=["consecutive_group",
+                     "is_first_in_consecutive_group"])
+
         return df.reset_index(drop=True)
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mats/submissions/best_gluon_3.csv")
+            PATH+"mats/submissions/gluon_3_remove_consecutive_measurements_66.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:
@@ -289,20 +322,41 @@ class Pipeline:
         return mean_absolute_error(
             best_submission["prediction"], df["prediction"])
 
-    def split_train_tune(self, df: pd.DataFrame):
-        df = df.copy()
-        df_estimated = df.loc[df["estimated"] == 1]
-        df_observed = df.loc[df["estimated"] == 0]
+    def drop_columns(self, df: pd.DataFrame):
+        drop = [
+            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
+            "wind_speed_w_1000hPa:ms",
+            "wind_speed_u_10m:ms",  # same as above
+            "wind_speed_v_10m:ms",  # same as above
+            "snow_density:kgm3",
+            # "snow_drift:idx",
+            # "snow_melt_10min:mm",  # veldig få verdier
+        ]
+        shared_columns = list(set(df.columns) & set(drop))
+        df = df.drop(columns=shared_columns)
+        return df
 
-        num_rows = len(df_estimated)
-        middle_index = num_rows // 2
+    def find_min_max_date_in_test(self) -> list:
+        locations = ["A", "B", "C"]
+        dates = []
+        for loc in locations:
+            df = self.get_test_data_by_location(loc)
+            df["date_forecast"] = pd.to_datetime(df["date_forecast"])
+            dates.append((df["date_forecast"].min(),
+                         df["date_forecast"].max()))
+        return dates
 
-        df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df.iloc[:middle_index]
-        tune = df.iloc[middle_index:]
+    def split_train_summer_2021(self, df: pd.DataFrame):
+        dates = self.find_min_max_date_in_test()
+        # set the dates to the summer of 2021
+        dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
+                 for date in dates]
 
-        train = pd.concat([df_observed, train_estimated])
-        return train, tune
+        summer2021 = df[(df["date_forecast"] >= dates[0][0]) & (
+            df["date_forecast"] <= dates[0][1])]
+
+        train = df[~df.index.isin(summer2021.index)]
+        return train, summer2021
 
     def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
         df = df[[prediction_column]].rename(

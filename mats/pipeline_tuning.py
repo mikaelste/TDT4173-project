@@ -322,7 +322,6 @@ class Pipeline:
 
     def split_train_summer_2021(self, df: pd.DataFrame):
         dates = self.find_min_max_date_in_test()
-        # set the dates to the summer of 2021
         dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
                  for date in dates]
 

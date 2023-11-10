@@ -209,7 +209,7 @@ class Pipeline:
         df[lag_columns] = df[lag_columns].shift(1)
         return df
 
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed=False):
         if consecutive_threshold < 2:
             return df
 
