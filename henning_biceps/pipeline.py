@@ -5,9 +5,7 @@ import os
 current_dir = os.getcwd()
 print("Current working directory:", current_dir)
 
-
-PATH = "/Users/matsalexander/Desktop/Forest Gump/"
-# PATH = "../"
+PATH = "../"
 # Estimate
 X_train_estimated_a: pd.DataFrame = pd.read_parquet(
     PATH + 'A/X_train_estimated.parquet')

@@ -97,11 +97,12 @@ class Pipeline:
     
     def get_all_data(self, location: str):
         train, targets = self.get_training_data_by_location("A")
-        test = self.get_test_data_by_location("A")
         train = self.drop_features(train)
+        
+        test = self.get_test_data_by_location("A")
         test = test[train.columns.to_list()]
         train = self.handle_data(train, targets)
-        test = self.handle_data(test, test=True)
+        test = self.handle_data(test, train=False)
         return train, test
 
     def get_data(self, location: str) -> pd.DataFrame:
@@ -113,25 +114,25 @@ class Pipeline:
         test_data = test_data[columns]
         return self.handle_data(test_data)
 
-    def handle_data(self, df, targets=pd.DataFrame(), test=False):
+    def handle_data(self, df, targets=pd.DataFrame(), train=True):
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["date_forecast"] = pd.to_datetime(df["date_forecast"])
-
-        # df = self.add_time_since_calucation(df)
 
         df = self.onehot_estimated(df)
         df = self.unzip_date_feature(df)
         df = self.grouped_by_hour(df)
-        df = self.add_lag_features(df)
+        # df = self.add_lag_features(df)
 
         df["time"] = df["date_forecast"]
-        # df.drop(["date_forecast"], axis=1, inplace=True)
+        df.drop(["date_forecast"], axis=1, inplace=True)
         if not targets.empty:
             df = self.merge_train_target(df, targets)
 
         # df.drop(["date_calc"], axis=1, inplace=True)
         df.drop(["time"], axis=1, inplace=True)
-        # df = self.absolute_values(df)
+        if train:
+            df = self.remove_consecutive_measurments(df, 4)
+        df = self.absolute_values(df)
         return df
 
     # –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– helper funciton ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -285,39 +286,11 @@ class Pipeline:
             "wind_speed_w_1000hPa:ms",
             "wind_speed_u_10m:ms",
             "wind_speed_v_10m:ms",
+            "snow_density:kgm3",
         ], inplace=True)
-        # correlated = DropCorrelatedFeatures(variables=None, method='pearson', threshold=0.8)
+        # correlated = DropCorrelatedFeatures(variables=None, method='spearman', threshold=0.98)
         # df = correlated.fit_transform(df)
         return df
-
-    def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
-        df = df[[prediction_column]].rename(
-            columns={prediction_column: "prediction"}).reset_index(drop=True).rename_axis(index="id")
-
-        df["prediction"] = df["prediction"].clip(lower=0)
-        return df
-    
-    def find_min_max_date_in_test(self) -> list:
-        locations = ["A", "B", "C"]
-        dates = []
-        for loc in locations:
-            df = self.get_test_data_by_location(loc)
-            df["date_forecast"] = pd.to_datetime(df["date_forecast"])
-            dates.append((df["date_forecast"].min(),
-                         df["date_forecast"].max()))
-        return dates
-
-    def split_train_summer_2021(self, df: pd.DataFrame):
-        dates = self.find_min_max_date_in_test()
-        # set the dates to the summer of 2021
-        dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
-                 for date in dates]
-
-        summer2021 = df[(df["date_forecast"] >= dates[0][0]) & (
-            df["date_forecast"] <= dates[0][1])]
-
-        train = df[~df.index.isin(summer2021.index)]
-        return train, summer2021
 
     def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
         df = df[[prediction_column]].rename(

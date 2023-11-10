@@ -145,7 +145,7 @@ class Pipeline:
     def add_lag_features(self, df: pd.DataFrame):
         no_cat_features_1h = [c for c in df.columns if "_1h:" in c]
         lag_cols = df[no_cat_features_1h].select_dtypes(include=["number", "float", "int"]).columns.to_list()
-        lag_f = LagFeatures(variables=lag_cols, periods=2)
+        lag_f = LagFeatures(variables=lag_cols, periods=1)
         df_tr = lag_f.fit_transform(df[lag_cols].select_dtypes(include=["number", "float", "int"]))
         df[df_tr.columns] = df_tr
         return df

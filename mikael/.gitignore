@@ -1,3 +1,7 @@
-/models*
-/autoML/models*
-/autoML/gluon/ag**
+models*
+autoML/models*
+autoML/gluon/ag**
+autoML/gluon/Au**
+autoML/autokeras/strucktured_model/*
+autoML/autokeras/structured_data_regressor/*
+autoML/autokeras/auto_model/*
