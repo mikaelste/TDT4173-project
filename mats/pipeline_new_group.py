@@ -329,7 +329,7 @@ class Pipeline:
             "wind_speed_u_10m:ms",  # same as above
             "wind_speed_v_10m:ms",  # same as above
             "snow_density:kgm3",
-            # "snow_drift:idx",
+            "snow_drift:idx",
             # "snow_melt_10min:mm",  # veldig få verdier
         ]
         shared_columns = list(set(df.columns) & set(drop))
