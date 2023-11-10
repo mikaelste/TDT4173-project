@@ -44,31 +44,6 @@ test_df_example = pd.read_csv(PATH + "test.csv")
 best_submission: pd.DataFrame = pd.read_csv(
     PATH + "mikael/submissions/fourth_submission.csv")
 
-optins = {
-    "randomize": False,
-    "consecutive_threshold": 6,
-    "normalize": False,
-    "group_by_hour": True,
-    "unzip_date_feature": True,
-}
-
-# make a options class with the options as attributes
-
-
-class Options:
-    randomize = False
-    consecutive_threshold = 6
-    normalize = False
-    group_by_hour = True
-    unzip_date_feature = True
-
-    def __init__(self, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=True, unzip_date_feature=True) -> None:
-        self.randomize = randomize
-        self.consecutive_threshold = consecutive_threshold
-        self.normalize = normalize
-        self.group_by_hour = group_by_hour
-        self.unzip_date_feature = unzip_date_feature
-
 
 class Pipeline:
 
@@ -141,7 +116,7 @@ class Pipeline:
             [X_train_observed_x, X_train_estimated_x]).reset_index(drop=True)
         return train, Y_train_x
 
-    def get_test_data_by_location(self, location: str,  normalize=False) -> pd.DataFrame:
+    def get_test_data_by_location(self, location: str) -> pd.DataFrame:
         if location == "A":
             df = X_test_estimated_a
         elif location == "B":
@@ -194,9 +169,6 @@ class Pipeline:
         # Use pivot_table to combine rows with the same date and hour
         pivot_df = df.pivot_table(index=['date_hour'], columns=[
                                   'min'], values=df.columns, aggfunc='first')
-        # rename the date_hour to date_forecast
-        # pivot_df.columns = [f'{col[0]}_{col[1]}' if col[1]
-        #                     else col[0] for col in pivot_df.columns]
 
         pivot_df.index.names = [date_column]
 
@@ -233,11 +205,6 @@ class Pipeline:
         columns = list(df.columns)
         df[columns] = df[columns].abs()
         df = df.replace(-0.0, 0.0)
-        return df
-
-    def lag_features_by_1_hour(df, columns_to_lag):
-        lag_columns = [c for c in df.columns if "_1h:" in c]
-        df[lag_columns] = df[lag_columns].shift(1)
         return df
 
     def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12,  return_removed=False):
@@ -335,28 +302,6 @@ class Pipeline:
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
         return df
-
-    def find_min_max_date_in_test(self) -> list:
-        locations = ["A", "B", "C"]
-        dates = []
-        for loc in locations:
-            df = self.get_test_data_by_location(loc)
-            df["date_forecast"] = pd.to_datetime(df["date_forecast"])
-            dates.append((df["date_forecast"].min(),
-                         df["date_forecast"].max()))
-        return dates
-
-    def split_train_summer_2021(self, df: pd.DataFrame):
-        dates = self.find_min_max_date_in_test()
-        # set the dates to the summer of 2021
-        dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
-                 for date in dates]
-
-        summer2021 = df[(df["date_forecast"] >= dates[0][0]) & (
-            df["date_forecast"] <= dates[0][1])]
-
-        train = df[~df.index.isin(summer2021.index)]
-        return train, summer2021
 
     def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
         df = df[[prediction_column]].rename(
