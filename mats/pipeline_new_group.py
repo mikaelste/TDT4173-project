@@ -286,7 +286,8 @@ class Pipeline:
         df["is_first_in_consecutive_group"] = False
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
-
+        rad_cols = [f"('direct_rad:W', {c})" for c in range(0, 60, 15)]
+        df["direct_rad:W"] = df[rad_cols].mean(axis=1)
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
             df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
@@ -305,7 +306,7 @@ class Pipeline:
         df = df.loc[~mask]
 
         df = df.drop(columns=["consecutive_group",
-                     "is_first_in_consecutive_group"])
+                     "is_first_in_consecutive_group", "direct_rad:W"])
 
         return df.reset_index(drop=True)
 
@@ -329,7 +330,7 @@ class Pipeline:
             "wind_speed_u_10m:ms",  # same as above
             "wind_speed_v_10m:ms",  # same as above
             "snow_density:kgm3",
-            "snow_drift:idx",
+            "snow_drift:idx",  # denne er ny. Fikk 140.9 uten.
             # "snow_melt_10min:mm",  # veldig få verdier
         ]
         shared_columns = list(set(df.columns) & set(drop))
