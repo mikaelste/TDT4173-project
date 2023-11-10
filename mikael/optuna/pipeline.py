@@ -5,6 +5,7 @@ import os
 current_dir = os.getcwd()
 print("Current working directory:", current_dir)
 
+
 PATH = "../../"
 # Estimate
 X_train_estimated_a: pd.DataFrame = pd.read_parquet(
@@ -208,9 +209,10 @@ class Pipeline:
         df[lag_columns] = df[lag_columns].shift(1)
         return df
 
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, retrun_counted=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed=False):
         if consecutive_threshold < 2:
             return df
+
         column_to_check = 'pv_measurement'
 
         mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
@@ -220,17 +222,54 @@ class Pipeline:
         df["is_first_in_consecutive_group"] = False
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
-        if retrun_counted:
-            # Dette er for feilsøking
-            return df
 
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
-            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
 
         mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0)
+            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False)
+
         mask = mask_non_zero | mask_zero
+
+        if return_removed:
+            return df[mask]
+
+        df = df.loc[~mask]
+
+        df = df.drop(columns=["consecutive_group",
+                     "is_first_in_consecutive_group"])
+
+        return df.reset_index(drop=True)
+
+    def remove_consecutive_measurments_new_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
+        if consecutive_threshold < 2:
+            return df
+
+        column_to_check = 'pv_measurement'
+
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
+        df['consecutive_group'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        df["is_first_in_consecutive_group"] = False
+        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
+            1)
+
+        # masks to remove rows
+        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
+
+        tol = 10
+        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] > tol)
+
+        mask_zero_no_rad = (df['consecutive_group'] >= consecutive_threshold_zero_no_rad) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] < tol)
+        mask = mask_non_zero | mask_zero | mask_zero_no_rad
+
+        if return_removed:
+            return df[mask]
 
         df = df.loc[~mask]
 
@@ -241,7 +280,7 @@ class Pipeline:
 
     def compare_mae(self, df: pd.DataFrame):
         best_submission: pd.DataFrame = pd.read_csv(
-            PATH+"mikael/best_prediction.csv")
+            PATH+"mats/submissions/gluon_3_remove_consecutive_measurements_66.csv")
         best_submission = best_submission[["prediction"]]
 
         if best_submission.shape != df.shape:

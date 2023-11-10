@@ -1,5 +1,6 @@
 import pandas as pd
 from sklearn.metrics import mean_absolute_error
+import numpy as np
 import os
 
 current_dir = os.getcwd()
@@ -103,15 +104,14 @@ class Pipeline:
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["date_forecast"] = pd.to_datetime(df["date_forecast"])
 
-        # df = self.add_time_since_calucation(df)
-        df = self.onehot_estimated(df)
         df = self.drop_columns(df)
+        df = self.grouped_by_hour(df)
+
         df = self.unzip_date_feature(df)
-        df = self.widen_dataframe_on_date_forecast(df)
+        df = self.onehot_estimated(df)
 
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
-
         if not targets.empty:
             df = self.merge_train_target(df, targets)
 
@@ -122,37 +122,6 @@ class Pipeline:
 
     # –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– helper funciton ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
-    def widen_dataframe_on_date_forecast(self, df: pd.DataFrame) -> pd.DataFrame:
-        # Shift the DataFrame by 15 minutes
-        df_15 = df[df['date_forecast'].dt.minute == 15].copy()
-        df_15['date_forecast'] = pd.to_datetime(df_15['date_forecast']) + pd.to_timedelta(45, "minutes")
-
-        # Shift the DataFrame by 30 minutes
-        df_30 = df[df['date_forecast'].dt.minute == 30].copy()
-        df_30['date_forecast'] = pd.to_datetime(df_30['date_forecast']) + pd.to_timedelta(30, "minutes")
-
-        # Shift the DataFrame by 45 minutes
-        df_45 = df[df['date_forecast'].dt.minute == 45].copy()
-        df_45['date_forecast'] = pd.to_datetime(df_45['date_forecast']) + pd.to_timedelta(15, "minutes")
-
-        # Get a list of columns to which you want to add the suffix
-        columns_to_suffix = [col for col in df.columns if col != 'date_forecast']
-
-        # Add the suffix to the selected columns
-        df_15[columns_to_suffix] = df_15[columns_to_suffix].add_suffix("_15")
-        df_30[columns_to_suffix] = df_30[columns_to_suffix].add_suffix("_30")
-        df_45[columns_to_suffix] = df_45[columns_to_suffix].add_suffix("_45")
-        
-        
-        df = df[df['date_forecast'].dt.minute == 0].copy()
-
-        # Merge the DataFrames on 'date_forecast' column with specified suffixes
-        df_merged = pd.merge(df, df_15, on='date_forecast', how='left', suffixes=('', '_15'))
-        df_merged = pd.merge(df_merged, df_30, on='date_forecast', how='left', suffixes=('', '_30'))
-        df_merged = pd.merge(df_merged, df_45, on='date_forecast', how='left', suffixes=('', '_45'))
-        
-        return df_merged
-    
     def get_training_data_by_location(self, location):
         if location == "A":
             X_train_observed_x = X_train_observed_a
@@ -185,8 +154,8 @@ class Pipeline:
 
     def unzip_date_feature(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         df[date_column] = pd.to_datetime(df[date_column])
-        df["day_of_year"] = df["date_forecast"].dt.day_of_year
-        df["hour"] = df["date_forecast"].dt.hour
+        df['day_of_year_sin'] = np.sin(2 * np.pi * df[date_column].dt.dayofyear / 365.25)
+        df['hour'] = np.sin(2 * np.pi * df[date_column].dt.hour / 24)
         # df["month"] = df["date_forecast"].dt.month
         return df
 
@@ -204,6 +173,7 @@ class Pipeline:
         estimated_mask = df["date_calc"].notna()
         df.loc[estimated_mask, "estimated"] = 1
         df.loc[~estimated_mask, "observed"] = 1
+        df.drop(columns=["date_calc"], inplace=True)
         return df
 
     def onehot_location(self, df, location):
@@ -215,7 +185,37 @@ class Pipeline:
             df["A"], df["B"], df["C"] = 0, 0, 1
         return df
 
-    def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast"):
+    def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast") -> pd.DataFrame:
+        # Group by hour and aggregate the values into lists for all columns
+        df['date_hour'] = df[date_column].dt.to_period('H')
+        df["min"] = df[date_column].dt.minute
+        df.drop(columns=[date_column], inplace=True)
+
+        # Use pivot_table to combine rows with the same date and hour
+        pivot_df = df.pivot_table(index=['date_hour'], columns=[
+                                  'min'], values=df.columns, aggfunc='first')
+        # rename the date_hour to date_forecast
+        # pivot_df.columns = [f'{col[0]}_{col[1]}' if col[1]
+        #                     else col[0] for col in pivot_df.columns]
+
+        pivot_df.index.names = [date_column]
+
+        # Reset index to make 'date' a regular column
+        pivot_df.columns = pivot_df.columns.to_flat_index()
+        pivot_df.reset_index(inplace=True)
+
+        pivot_df["date_forecast"] = pivot_df["date_forecast"].dt.to_timestamp()
+
+        pivot_df["date_calc"] = pivot_df[('date_calc', 0)]
+        pivot_df.drop(columns=[
+            ('date_calc', c) for c in range(0, 60, 15)
+        ], inplace=True)
+
+        pivot_df.columns = [str(col) for col in pivot_df.columns]
+
+        return pivot_df
+
+    def grouped_by_hour_old(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         df = df.groupby(pd.Grouper(key=date_column, freq="1H")
                         ).mean(numeric_only=True)
         all_nan_mask = df.isnull().all(axis=1)
@@ -230,22 +230,20 @@ class Pipeline:
         return merged
 
     def absolute_values(self, df: pd.DataFrame):
-        # safe = ["sun_elevation:d", "sun_elevation:d_45"]
-        # columns = [c for c in df.columns.to_list() if c not in safe]
-        numeric_columns = df.select_dtypes(include='number').columns
-        df[numeric_columns] = df[numeric_columns].abs()
+        columns = list(df.columns)
+        df[columns] = df[columns].abs()
         df = df.replace(-0.0, 0.0)
         return df
-
 
     def lag_features_by_1_hour(df, columns_to_lag):
         lag_columns = [c for c in df.columns if "_1h:" in c]
         df[lag_columns] = df[lag_columns].shift(1)
         return df
 
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, retrun_counted=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12,  return_removed=False):
         if consecutive_threshold < 2:
             return df
+
         column_to_check = 'pv_measurement'
 
         mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
@@ -255,22 +253,59 @@ class Pipeline:
         df["is_first_in_consecutive_group"] = False
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
-        if retrun_counted:
-            # Dette er for feilsøking
-            return df
 
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
-            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
 
         mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0)
+            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False)
+
         mask = mask_non_zero | mask_zero
+
+        if return_removed:
+            return df[mask]
 
         df = df.loc[~mask]
 
-        df.drop(columns=["consecutive_group",
-                     "is_first_in_consecutive_group"], inplace=True)
+        df = df.drop(columns=["consecutive_group",
+                     "is_first_in_consecutive_group"])
+
+        return df.reset_index(drop=True)
+
+    def remove_consecutive_measurments_new_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
+        if consecutive_threshold < 2:
+            return df
+
+        column_to_check = 'pv_measurement'
+
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
+        df['consecutive_group'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        df["is_first_in_consecutive_group"] = False
+        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
+            1)
+
+        # masks to remove rows
+        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
+
+        tol = 10
+        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] > tol)
+
+        mask_zero_no_rad = (df['consecutive_group'] >= consecutive_threshold_zero_no_rad) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] < tol)
+        mask = mask_non_zero | mask_zero | mask_zero_no_rad
+
+        if return_removed:
+            return df[mask]
+
+        df = df.loc[~mask]
+
+        df = df.drop(columns=["consecutive_group",
+                     "is_first_in_consecutive_group"])
 
         return df.reset_index(drop=True)
 
@@ -287,43 +322,14 @@ class Pipeline:
         return mean_absolute_error(
             best_submission["prediction"], df["prediction"])
 
-    def split_train_tune(self, df: pd.DataFrame):
-        df = df.copy()
-        df_estimated = df.loc[df["estimated"] == 1]
-        df_observed = df.loc[df["estimated"] == 0]
-
-        num_rows = len(df_estimated)
-        middle_index = num_rows // 2
-
-        df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df_estimated.iloc[:middle_index]
-        tune = df_estimated.iloc[middle_index:]
-
-        train = pd.concat([df_observed, train_estimated])
-        return train, tune
-
     def drop_columns(self, df: pd.DataFrame):
         drop = [
             # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
             "wind_speed_w_1000hPa:ms",
             "wind_speed_u_10m:ms",  # same as above
             "wind_speed_v_10m:ms",  # same as above
-            # "snow_drift:idx",
-            # "snow_density:kgm3",
-            # "snow_melt_10min:mm",  # veldig få verdier
-        ]
-        shared_columns = list(set(df.columns) & set(drop)) + ["date_calc"]
-        df = df.drop(columns=shared_columns)
-        return df
-
-    def drop_columns_new(self, df: pd.DataFrame):
-        drop = [
-            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
-            "wind_speed_w_1000hPa:ms",
-            "wind_speed_u_10m:ms",  # same as above
-            "wind_speed_v_10m:ms",  # same as above
-            "snow_drift:idx",
             "snow_density:kgm3",
+            "snow_drift:idx",
             # "snow_melt_10min:mm",  # veldig få verdier
         ]
         shared_columns = list(set(df.columns) & set(drop))
