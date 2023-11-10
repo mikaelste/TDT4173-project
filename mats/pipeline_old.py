@@ -225,11 +225,48 @@ class Pipeline:
 
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
-            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
 
         mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
-            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False) & (abs(df["direct_rad:W"]) < 0.1)
+            df["pv_measurement"] == 0) & (df["is_first_in_consecutive_group"] == False)
+
         mask = mask_non_zero | mask_zero
+
+        if return_removed:
+            return df[mask]
+
+        df = df.loc[~mask]
+
+        df = df.drop(columns=["consecutive_group",
+                     "is_first_in_consecutive_group"])
+
+        return df.reset_index(drop=True)
+
+    def remove_consecutive_measurments_new_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, consecutive_threshold_zero_no_rad=20, return_removed=False):
+        if consecutive_threshold < 2:
+            return df
+
+        column_to_check = 'pv_measurement'
+
+        mask = (df[column_to_check] != df[column_to_check].shift(1)).cumsum()
+        df['consecutive_group'] = df.groupby(
+            mask).transform('count')[column_to_check]
+
+        df["is_first_in_consecutive_group"] = False
+        df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
+            1)
+
+        # masks to remove rows
+        mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
+            df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
+
+        tol = 10
+        mask_zero = (df['consecutive_group'] >= consecutive_threshold_zero) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] > tol)
+
+        mask_zero_no_rad = (df['consecutive_group'] >= consecutive_threshold_zero_no_rad) & (
+            df["pv_measurement"] == 0) & (df["direct_rad:W"] < tol)
+        mask = mask_non_zero | mask_zero | mask_zero_no_rad
 
         if return_removed:
             return df[mask]

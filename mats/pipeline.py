@@ -44,31 +44,6 @@ test_df_example = pd.read_csv(PATH + "test.csv")
 best_submission: pd.DataFrame = pd.read_csv(
     PATH + "mikael/submissions/fourth_submission.csv")
 
-optins = {
-    "randomize": False,
-    "consecutive_threshold": 6,
-    "normalize": False,
-    "group_by_hour": True,
-    "unzip_date_feature": True,
-}
-
-# make a options class with the options as attributes
-
-
-class Options:
-    randomize = False
-    consecutive_threshold = 6
-    normalize = False
-    group_by_hour = True
-    unzip_date_feature = True
-
-    def __init__(self, randomize=False, consecutive_threshold=6, normalize=False, group_by_hour=True, unzip_date_feature=True) -> None:
-        self.randomize = randomize
-        self.consecutive_threshold = consecutive_threshold
-        self.normalize = normalize
-        self.group_by_hour = group_by_hour
-        self.unzip_date_feature = unzip_date_feature
-
 
 class Pipeline:
 
@@ -104,14 +79,14 @@ class Pipeline:
         df["date_calc"] = pd.to_datetime(df["date_calc"])
         df["date_forecast"] = pd.to_datetime(df["date_forecast"])
 
-        # df = self.add_time_since_calucation(df)
-        df = self.onehot_estimated(df)
-        df = self.unzip_date_feature(df)
+        df = self.drop_columns(df)
         df = self.grouped_by_hour(df)
+
+        df = self.unzip_date_feature(df)
+        df = self.onehot_estimated(df)
 
         df["time"] = df["date_forecast"]
         df.drop(["date_forecast"], axis=1, inplace=True)
-
         if not targets.empty:
             df = self.merge_train_target(df, targets)
 
@@ -141,7 +116,7 @@ class Pipeline:
             [X_train_observed_x, X_train_estimated_x]).reset_index(drop=True)
         return train, Y_train_x
 
-    def get_test_data_by_location(self, location: str,  normalize=False) -> pd.DataFrame:
+    def get_test_data_by_location(self, location: str) -> pd.DataFrame:
         if location == "A":
             df = X_test_estimated_a
         elif location == "B":
@@ -173,6 +148,7 @@ class Pipeline:
         estimated_mask = df["date_calc"].notna()
         df.loc[estimated_mask, "estimated"] = 1
         df.loc[~estimated_mask, "observed"] = 1
+        df.drop(columns=["date_calc"], inplace=True)
         return df
 
     def onehot_location(self, df, location):
@@ -184,7 +160,34 @@ class Pipeline:
             df["A"], df["B"], df["C"] = 0, 0, 1
         return df
 
-    def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast"):
+    def grouped_by_hour(self, df: pd.DataFrame, date_column: str = "date_forecast") -> pd.DataFrame:
+        # Group by hour and aggregate the values into lists for all columns
+        df['date_hour'] = df[date_column].dt.to_period('H')
+        df["min"] = df[date_column].dt.minute
+        df.drop(columns=[date_column], inplace=True)
+
+        # Use pivot_table to combine rows with the same date and hour
+        pivot_df = df.pivot_table(index=['date_hour'], columns=[
+                                  'min'], values=df.columns, aggfunc='first')
+
+        pivot_df.index.names = [date_column]
+
+        # Reset index to make 'date' a regular column
+        pivot_df.columns = pivot_df.columns.to_flat_index()
+        pivot_df.reset_index(inplace=True)
+
+        pivot_df["date_forecast"] = pivot_df["date_forecast"].dt.to_timestamp()
+
+        pivot_df["date_calc"] = pivot_df[('date_calc', 0)]
+        pivot_df.drop(columns=[
+            ('date_calc', c) for c in range(0, 60, 15)
+        ], inplace=True)
+
+        pivot_df.columns = [str(col) for col in pivot_df.columns]
+
+        return pivot_df
+
+    def grouped_by_hour_old(self, df: pd.DataFrame, date_column: str = "date_forecast"):
         df = df.groupby(pd.Grouper(key=date_column, freq="1H")
                         ).mean(numeric_only=True)
         all_nan_mask = df.isnull().all(axis=1)
@@ -204,12 +207,7 @@ class Pipeline:
         df = df.replace(-0.0, 0.0)
         return df
 
-    def lag_features_by_1_hour(df, columns_to_lag):
-        lag_columns = [c for c in df.columns if "_1h:" in c]
-        df[lag_columns] = df[lag_columns].shift(1)
-        return df
-
-    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12, return_removed=False):
+    def remove_consecutive_measurments_new(self, df: pd.DataFrame, consecutive_threshold=3, consecutive_threshold_zero=12,  return_removed=False):
         if consecutive_threshold < 2:
             return df
 
@@ -255,7 +253,8 @@ class Pipeline:
         df["is_first_in_consecutive_group"] = False
         df['is_first_in_consecutive_group'] = df['consecutive_group'] != df['consecutive_group'].shift(
             1)
-
+        rad_cols = [f"('direct_rad:W', {c})" for c in range(0, 60, 15)]
+        df["direct_rad:W"] = df[rad_cols].mean(axis=1)
         # masks to remove rows
         mask_non_zero = (df['consecutive_group'] >= consecutive_threshold) & (
             df["pv_measurement"] > 0) & (df["is_first_in_consecutive_group"] == False)  # or df["direct_rad:W"] == 0)
@@ -274,7 +273,7 @@ class Pipeline:
         df = df.loc[~mask]
 
         df = df.drop(columns=["consecutive_group",
-                     "is_first_in_consecutive_group"])
+                     "is_first_in_consecutive_group", "direct_rad:W"])
 
         return df.reset_index(drop=True)
 
@@ -291,70 +290,18 @@ class Pipeline:
         return mean_absolute_error(
             best_submission["prediction"], df["prediction"])
 
-    def split_train_tune(self, df: pd.DataFrame):
-        df = df.copy()
-        df_estimated = df.loc[df["estimated"] == 1]
-        df_observed = df.loc[df["estimated"] == 0]
-
-        num_rows = len(df_estimated)
-        middle_index = num_rows // 2
-
-        df_estimated.sample(frac=1, random_state=42)
-        train_estimated = df_estimated.iloc[:middle_index]
-        tune = df_estimated.iloc[middle_index:]
-
-        train = pd.concat([df_observed, train_estimated])
-        return train, tune
-
     def drop_columns(self, df: pd.DataFrame):
         drop = [
             # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
             "wind_speed_w_1000hPa:ms",
             "wind_speed_u_10m:ms",  # same as above
             "wind_speed_v_10m:ms",  # same as above
-            # "snow_drift:idx",
-            # "snow_density:kgm3",
-            # "snow_melt_10min:mm",  # veldig få verdier
-        ]
-        shared_columns = list(set(df.columns) & set(drop))
-        df = df.drop(columns=shared_columns)
-        return df
-
-    def drop_columns_new(self, df: pd.DataFrame):
-        drop = [
-            # wind speed vector u, available up to 20000 m, from 1000 hPa to 10 hPa and on flight levels FL10-FL900[m/s] does not make sens at surfece level
-            "wind_speed_w_1000hPa:ms",
-            "wind_speed_u_10m:ms",  # same as above
-            "wind_speed_v_10m:ms",  # same as above
-            "snow_drift:idx",
             "snow_density:kgm3",
-            # "snow_melt_10min:mm",  # veldig få verdier
+            "snow_drift:idx",  # denne er ny. Fikk 140.9 uten.
         ]
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
         return df
-
-    def find_min_max_date_in_test(self) -> list:
-        locations = ["A", "B", "C"]
-        dates = []
-        for loc in locations:
-            df = self.get_test_data_by_location(loc)
-            df["date_forecast"] = pd.to_datetime(df["date_forecast"])
-            dates.append((df["date_forecast"].min(),
-                         df["date_forecast"].max()))
-        return dates
-
-    def split_train_summer_2021(self, df: pd.DataFrame):
-        dates = self.find_min_max_date_in_test()
-        # set the dates to the summer of 2021
-        dates = [(date[0].replace(year=2021), date[1].replace(year=2021))
-                 for date in dates]
-
-        summer2021 = df[(df["date_forecast"] >= dates[0][0]) & (
-            df["date_forecast"] <= dates[0][1])]
-
-        train = df[~df.index.isin(summer2021.index)]
-        return train, summer2021
 
     def post_processing(self, df: pd.DataFrame, prediction_column: str = "prediction_label"):
         df = df[[prediction_column]].rename(
