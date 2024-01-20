@@ -298,6 +298,7 @@ class Pipeline:
             "wind_speed_v_10m:ms",  # same as above
             "snow_density:kgm3",
             "snow_drift:idx",  # denne er ny. Fikk 140.9 uten.
+            "cloud_base_agl:m"
         ]
         shared_columns = list(set(df.columns) & set(drop))
         df = df.drop(columns=shared_columns)
@@ -309,64 +310,3 @@ class Pipeline:
 
         df["prediction"] = df["prediction"].clip(lower=0)
         return df
-
-
-# pipe = Pipeline()
-# df00 = pipe.get_combined_data()
-# df00
-
-
-# pipin = Pipin()
-# x = pipin.get_combined_datasets(data_sets={"A"})
-
-# get all date_calc.rows that are nan
-
-
-# pipin.compare_mae(pd.DataFrame({"prediction": [1,2,3,4,5]}))
-
-# print("df", big_data.head())
-# pipin = Pipin()
-# test = pipin.get_combined_test_data()
-# pipin.get_data("B")
-
-important_features = [
-    'time',
-    'direct_rad:W',
-    'diffuse_rad:W',
-    'sun_azimuth:d',
-    'sun_elevation:d',
-    'clear_sky_energy_1h:J',
-    'clear_sky_rad:W',
-    'total_cloud_cover:p',
-    'effective_cloud_cover:p',
-    'rain_water:kgm2',
-    'precip_5min:mm',
-    'wind_speed_10m:ms',
-    'wind_speed_w_1000hPa:ms',
-    'super_cooled_liquid_water:kgm2',
-    'air_density_2m:kgm3',
-    'pressure_100m:hPa',
-    'pressure_50m:hPa',
-    'sfc_pressure:hPa',
-    'msl_pressure:hPa',
-    'dew_point_2m:K',
-    'is_day:idx',
-    'is_in_shadow:idx',
-    'elevation:m',
-
-    "snow_melt_10min:mm",
-    "snow_density:kgm3",
-    "fresh_snow_6h:cm",
-    "fresh_snow_1h:cm",
-    "snow_water:kgm2",
-    "fresh_snow_12h:cm",
-    "fresh_snow_3h:cm",
-    "fresh_snow_24h:cm",
-    "snow_depth:cm",
-
-    'A',
-    'B',
-    'C',
-    "estimated",
-    "observed",
-]
